@@ -86,7 +86,7 @@ Once `android/` exists (after the first CI run, or if you run
 - Use `npx @capacitor/assets generate` with a source icon to regenerate all
   densities automatically.
 
-## 6. Verified against the real protocol, plus a darkness workaround
+## 6. Verified against the real protocol
 
 I found and cross-checked the actual reverse-engineered protocol for this
 printer family (these are commonly called "cat printers" / sold with an
@@ -95,16 +95,15 @@ format in `catPrinterProtocol.ts` match the documented reference exactly.
 
 There's also a known, unresolved community issue with these printers: even a
 byte-perfect reimplementation of the protocol tends to print lighter than the
-official vendor app, and nobody has published why. As a practical workaround,
-each row is now sent **twice** in a row — since the printer advances the
-paper one physical line per row command, this deposits each line onto two
-consecutive physical rows instead of one, giving it roughly double the
-thermal exposure.
+official vendor app, and nobody has published why.
 
-**Trade-off**: receipts now print at roughly **double their previous
-length** (more paper per receipt) in exchange for darker output. If that
-paper cost isn't worth it for you, let me know and I can make it optional
-or revert it.
+To get darker output **without** using more paper, the fix is now purely in
+image processing: borderline gray pixels count as ink more readily, and thin
+strokes get thickened using all 8 surrounding pixels (not just the 4
+above/below/left/right) — this bolds up text and lines without changing the
+receipt's length at all. (An earlier version of this fix tried doubling paper
+length for extra darkness — that's been removed per your request to keep
+paper usage the same.)
 
 ## Notes
 - The workflow builds a **debug** APK (unsigned, fine for testing/sideloading).

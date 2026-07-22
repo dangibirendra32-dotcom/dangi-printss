@@ -155,17 +155,7 @@ export function buildCatPrinterImageCommands(rows: boolean[][], energy = 0xffff)
     CMD_LATTICE_START,
   ];
   for (const row of rows) {
-    // Print each row twice in a row. The printer's firmware advances the
-    // paper by one physical dot-row per row command, so this deposits the
-    // same line onto two consecutive physical rows rather than reprinting
-    // over itself — giving each logical line roughly double the thermal
-    // exposure/stroke thickness (receipts come out ~2x taller as a result).
-    // This is a known community workaround for these printers: even a
-    // byte-correct reimplementation of the protocol tends to print lighter
-    // than the official vendor app, and no one has fully reverse-engineered
-    // why — this compensates for it in software instead.
-    const rowCmd = cmdPrintRow(row);
-    packets.push(rowCmd, rowCmd);
+    packets.push(cmdPrintRow(row));
   }
   packets.push(
     cmdFeedPaper(25),
@@ -206,9 +196,9 @@ export function canvasToCatPrinterRows(canvas: HTMLCanvasElement): boolean[][] {
   const sctx = sourceCanvas.getContext('2d')!;
   const imgData = sctx.getImageData(0, 0, w, h).data;
 
-  // Slightly generous threshold (was 185) — thermal print heads lose fine/light
-  // detail, so borderline gray pixels need to count as ink or the output fades.
-  const INK_THRESHOLD = 210;
+  // Slightly generous threshold — thermal print heads lose fine/light detail,
+  // so borderline gray pixels need to count as ink or the output fades.
+  const INK_THRESHOLD = 225;
 
   const raw: boolean[][] = [];
   for (let y = 0; y < h; y++) {
@@ -224,17 +214,23 @@ export function canvasToCatPrinterRows(canvas: HTMLCanvasElement): boolean[][] {
     raw.push(row);
   }
 
-  // Dilate by 1px (any inked pixel also inks its 4-neighbors). This thickens
-  // thin text/line strokes so they don't disappear on print — a plain 1:1
-  // bilevel conversion of small text reliably prints faint/broken otherwise.
+  // Dilate using the full 8-neighbor (including diagonals) rather than just
+  // the 4 orthogonal neighbors. This thickens thin text/line strokes so they
+  // don't disappear on print, without adding any extra rows/paper length —
+  // it only changes which existing pixels count as ink, not the image size.
   const rows: boolean[][] = raw.map(row => [...row]);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < CAT_PRINTER_WIDTH; x++) {
       if (!raw[y][x]) continue;
-      if (x > 0) rows[y][x - 1] = true;
-      if (x < CAT_PRINTER_WIDTH - 1) rows[y][x + 1] = true;
-      if (y > 0) rows[y - 1][x] = true;
-      if (y < h - 1) rows[y + 1][x] = true;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const ny = y + dy;
+          const nx = x + dx;
+          if (ny >= 0 && ny < h && nx >= 0 && nx < CAT_PRINTER_WIDTH) {
+            rows[ny][nx] = true;
+          }
+        }
+      }
     }
   }
   return rows;
