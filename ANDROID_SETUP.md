@@ -54,7 +54,7 @@ Note: the **Quick Reprint** feature (reprinting a past receipt with adjusted
 amounts) still uses the older plain-text method, so it won't include the logo
 yet — only the main Print button has been upgraded so far.
 
-## 5. Bluetooth printing: now supports both printer families
+## 5. Bluetooth printing: works both in-browser and in the installed app
 
 The app detects what kind of printer you connect to and speaks its language
 automatically:
@@ -68,11 +68,14 @@ automatically:
   now auto-detects which type you paired and re-encodes the receipt as an
   image for cat printers automatically.
 
-This still uses the Web Bluetooth API under the hood, so the WebView caveat
-from the section above still applies — Bluetooth printing works in desktop/
-Android Chrome, but **not yet in the wrapped Android APK's WebView**. Native
-BLE (via `@capacitor-community/bluetooth-le`) is the next step to make it work
-inside the installed app — say the word if you want that wired up too.
+Bluetooth printing was initially only confirmed working in a phone/desktop
+browser (Chrome), because the installed Android app's WebView doesn't support
+the Web Bluetooth API at all. That's now fixed: `printer.ts` detects whether
+it's running as an installed app or in a browser, and automatically uses a
+native Bluetooth plugin (`@capacitor-community/bluetooth-le`) inside the
+installed app, while still using the browser's own Bluetooth in Chrome. No
+extra steps needed — just install the newly-built APK and use "Connect
+Printer" from inside the app itself.
 
 ## 4. Customizing the app icon/name later
 

@@ -20,12 +20,26 @@ import {
   buildCatPrinterImageCommands,
   canvasToCatPrinterRows,
 } from './catPrinterProtocol';
+import { Capacitor } from '@capacitor/core';
+import { BleClient, numbersToDataView } from '@capacitor-community/bluetooth-le';
 
 type PrinterType = 'escpos' | 'catprinter';
 
 export class ThermalPrinter {
+  // Web Bluetooth (browser) state
   private device: BluetoothDevice | null = null;
   private characteristic: BluetoothRemoteGATTCharacteristic | null = null;
+
+  // Native BLE (installed Android/iOS app) state — the WebView an installed
+  // Capacitor app runs in does not support the Web Bluetooth API at all, so
+  // a separate native plugin path is required for the app to actually be
+  // able to print once installed (this worked in the browser already; this
+  // is what makes it also work in the installed app).
+  private nativeDeviceId: string | null = null;
+  private nativeServiceUuid: string | null = null;
+  private nativeCharUuid: string | null = null;
+  private nativeWriteWithoutResponse = false;
+
   private printerType: PrinterType = 'escpos';
 
   // Common Thermal Printer Service UUIDs used by various brands (including HM-10, CC2541, ISSC, Avery, etc.)
@@ -44,6 +58,88 @@ export class ThermalPrinter {
   ];
 
   async connect() {
+    if (Capacitor.isNativePlatform()) {
+      return this.connectNative();
+    }
+    return this.connectWeb();
+  }
+
+  private async connectNative(): Promise<boolean> {
+    try {
+      await BleClient.initialize();
+
+      const allServices = [...CAT_PRINTER_SERVICE_UUIDS, ...ThermalPrinter.KNOWN_SERVICES];
+
+      // `services: []` (no required filter) plus `optionalServices` mirrors
+      // the browser's acceptAllDevices behavior — shows every nearby BLE
+      // device, not just ones already known to advertise these UUIDs.
+      const device = await BleClient.requestDevice({
+        services: [],
+        optionalServices: allServices,
+      });
+
+      await BleClient.connect(device.deviceId, () => {
+        this.nativeDeviceId = null;
+        this.nativeServiceUuid = null;
+        this.nativeCharUuid = null;
+      });
+
+      const services = await BleClient.getServices(device.deviceId);
+
+      this.printerType = 'escpos';
+      let matchedService: (typeof services)[number] | undefined;
+
+      for (const uuid of CAT_PRINTER_SERVICE_UUIDS) {
+        matchedService = services.find(s => s.uuid.toLowerCase() === uuid.toLowerCase());
+        if (matchedService) {
+          this.printerType = 'catprinter';
+          console.log(`Detected cat-printer style device on service: ${uuid}`);
+          break;
+        }
+      }
+
+      if (!matchedService) {
+        for (const uuid of ThermalPrinter.KNOWN_SERVICES) {
+          matchedService = services.find(s => s.uuid.toLowerCase() === uuid.toLowerCase());
+          if (matchedService) {
+            console.log(`Successfully connected to printer service: ${uuid}`);
+            break;
+          }
+        }
+      }
+
+      if (!matchedService && services.length > 0) {
+        matchedService = services[0];
+      }
+
+      if (!matchedService) {
+        throw new Error('No matching print services found on this device. Make sure the printer is turned on.');
+      }
+
+      let characteristic;
+      if (this.printerType === 'catprinter') {
+        characteristic =
+          matchedService.characteristics.find(c => c.uuid.toLowerCase() === CAT_PRINTER_TX_CHARACTERISTIC_UUID.toLowerCase()) ||
+          matchedService.characteristics.find(c => c.properties.write || c.properties.writeWithoutResponse);
+      } else {
+        characteristic = matchedService.characteristics.find(c => c.properties.write || c.properties.writeWithoutResponse);
+      }
+
+      if (!characteristic) throw new Error('No writable characteristic found for printing');
+
+      this.nativeDeviceId = device.deviceId;
+      this.nativeServiceUuid = matchedService.uuid;
+      this.nativeCharUuid = characteristic.uuid;
+      this.nativeWriteWithoutResponse = !!characteristic.properties.writeWithoutResponse;
+
+      return true;
+    } catch (error) {
+      console.error('Native Bluetooth connection failed:', error);
+      return false;
+    }
+  }
+
+  private async connectWeb(): Promise<boolean> {
     try {
       // Try cat-printer service UUIDs first (they're specific/unambiguous),
       // then fall back to the broader generic ESC/POS serial UUID list.
@@ -131,7 +227,9 @@ export class ThermalPrinter {
   }
 
   async print(data: Uint8Array) {
-    if (!this.characteristic) throw new Error('Printer not connected');
+    const isNative = Capacitor.isNativePlatform();
+    if (isNative && !this.nativeDeviceId) throw new Error('Printer not connected');
+    if (!isNative && !this.characteristic) throw new Error('Printer not connected');
 
     let outgoing = data;
 
@@ -150,12 +248,21 @@ export class ThermalPrinter {
     for (let i = 0; i < outgoing.length; i += chunkSize) {
       const chunk = outgoing.slice(i, i + chunkSize);
 
-      if (typeof this.characteristic.writeValueWithoutResponse === 'function' && this.characteristic.properties.writeWithoutResponse) {
-        await this.characteristic.writeValueWithoutResponse(chunk);
-      } else if (typeof this.characteristic.writeValueWithResponse === 'function') {
-        await this.characteristic.writeValueWithResponse(chunk);
-      } else {
-        await this.characteristic.writeValue(chunk);
+      if (isNative) {
+        const dv = numbersToDataView(Array.from(chunk));
+        if (this.nativeWriteWithoutResponse) {
+          await BleClient.writeWithoutResponse(this.nativeDeviceId!, this.nativeServiceUuid!, this.nativeCharUuid!, dv);
+        } else {
+          await BleClient.write(this.nativeDeviceId!, this.nativeServiceUuid!, this.nativeCharUuid!, dv);
+        }
+      } else if (this.characteristic) {
+        if (typeof this.characteristic.writeValueWithoutResponse === 'function' && this.characteristic.properties.writeWithoutResponse) {
+          await this.characteristic.writeValueWithoutResponse(chunk);
+        } else if (typeof this.characteristic.writeValueWithResponse === 'function') {
+          await this.characteristic.writeValueWithResponse(chunk);
+        } else {
+          await this.characteristic.writeValue(chunk);
+        }
       }
 
       // Micro-sleep to allow the printer's hardware buffer to process incoming bytes without dropping them
