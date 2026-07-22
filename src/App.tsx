@@ -51,7 +51,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import confetti from 'canvas-confetti';
 import * as pdfjsLib from 'pdfjs-dist';
-import html2canvas from 'html2canvas';
+import html2canvas from 'html2canvas-pro';
 // @ts-expect-error - Vite ?url imports are not natively typed in TypeScript config
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
@@ -945,7 +945,7 @@ export default function App() {
       saveToHistory();
     } catch (error) {
       console.error("Printing failed", error);
-      alert("Printing failed. See console for details.");
+      alert("Printing failed: " + (error instanceof Error ? error.message : String(error)));
     }
   };
 
