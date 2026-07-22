@@ -86,6 +86,26 @@ Once `android/` exists (after the first CI run, or if you run
 - Use `npx @capacitor/assets generate` with a source icon to regenerate all
   densities automatically.
 
+## 6. Verified against the real protocol, plus a darkness workaround
+
+I found and cross-checked the actual reverse-engineered protocol for this
+printer family (these are commonly called "cat printers" / sold with an
+"iPrint" style app). The command sequence, checksum method, and packet
+format in `catPrinterProtocol.ts` match the documented reference exactly.
+
+There's also a known, unresolved community issue with these printers: even a
+byte-perfect reimplementation of the protocol tends to print lighter than the
+official vendor app, and nobody has published why. As a practical workaround,
+each row is now sent **twice** in a row — since the printer advances the
+paper one physical line per row command, this deposits each line onto two
+consecutive physical rows instead of one, giving it roughly double the
+thermal exposure.
+
+**Trade-off**: receipts now print at roughly **double their previous
+length** (more paper per receipt) in exchange for darker output. If that
+paper cost isn't worth it for you, let me know and I can make it optional
+or revert it.
+
 ## Notes
 - The workflow builds a **debug** APK (unsigned, fine for testing/sideloading).
   For a Play Store release you'd need a signed **release** build — I can add

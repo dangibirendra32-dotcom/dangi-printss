@@ -155,7 +155,17 @@ export function buildCatPrinterImageCommands(rows: boolean[][], energy = 0xffff)
     CMD_LATTICE_START,
   ];
   for (const row of rows) {
-    packets.push(cmdPrintRow(row));
+    // Print each row twice in a row. The printer's firmware advances the
+    // paper by one physical dot-row per row command, so this deposits the
+    // same line onto two consecutive physical rows rather than reprinting
+    // over itself — giving each logical line roughly double the thermal
+    // exposure/stroke thickness (receipts come out ~2x taller as a result).
+    // This is a known community workaround for these printers: even a
+    // byte-correct reimplementation of the protocol tends to print lighter
+    // than the official vendor app, and no one has fully reverse-engineered
+    // why — this compensates for it in software instead.
+    const rowCmd = cmdPrintRow(row);
+    packets.push(rowCmd, rowCmd);
   }
   packets.push(
     cmdFeedPaper(25),
