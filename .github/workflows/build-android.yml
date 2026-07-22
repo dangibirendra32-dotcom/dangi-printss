@@ -1,0 +1,71 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install web dependencies
+        run: npm install
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Add Android platform (first run only)
+        run: |
+          if [ ! -d "android" ]; then
+            npx cap add android
+          else
+            npx cap sync android
+          fi
+
+      - name: Add required permissions to AndroidManifest.xml
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          for PERM in \
+            "android.permission.CAMERA" \
+            "android.permission.BLUETOOTH" \
+            "android.permission.BLUETOOTH_ADMIN" \
+            "android.permission.BLUETOOTH_SCAN" \
+            "android.permission.BLUETOOTH_CONNECT" \
+            "android.permission.ACCESS_FINE_LOCATION"; do
+            LINE="    <uses-permission android:name=\"$PERM\" />"
+            grep -qF "\"$PERM\"" "$MANIFEST" || sed -i "/<\/manifest>/i\\$LINE" "$MANIFEST"
+          done
+          grep -q "uses-feature android:name=\"android.hardware.camera\"" "$MANIFEST" || \
+            sed -i "/<\/manifest>/i\\    <uses-feature android:name=\"android.hardware.camera\" android:required=\"false\" \/>" "$MANIFEST"
+          cat "$MANIFEST"
+
+      - name: Sync web build into Android project
+        run: npx cap sync android
+
+      - name: Grant execute permission to gradlew
+        run: chmod +x android/gradlew
+
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dangi-print-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
