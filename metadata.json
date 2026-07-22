@@ -1,0 +1,6 @@
+{
+  "name": "Dangi Print",
+  "description": "Professional 2-inch thermal receipt generator for Super Marts, Restaurants, and Petrol Pumps with Bluetooth printing and QR support.",
+  "requestFramePermissions": ["camera", "bluetooth"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
