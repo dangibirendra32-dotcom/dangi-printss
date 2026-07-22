@@ -130,6 +130,12 @@ export class ThermalPrinter {
       this.nativeDeviceId = device.deviceId;
       this.nativeServiceUuid = matchedService.uuid;
       this.nativeCharUuid = characteristic.uuid;
+      // Prefer fast, unacknowledged writes when available — matches the
+      // browser path (Web Bluetooth's writeValueWithoutResponse), which
+      // already prints correctly. Waiting for an acknowledgment on every
+      // packet slows the data stream enough for the thermal print head to
+      // cool between chunks, which produces a uniformly faded print rather
+      // than fixing anything.
       this.nativeWriteWithoutResponse = !!characteristic.properties.writeWithoutResponse;
 
       return true;
@@ -243,8 +249,12 @@ export class ThermalPrinter {
     }
 
     // Most mini printers have extremely small BLE buffers (often 20 bytes up to 128 bytes).
-    // Using 64-byte chunks with a 15ms sleep is the sweet spot for maximum reliability across all generic printers.
+    // Using 64-byte chunks with a 15ms sleep is the sweet spot for maximum
+    // reliability across generic printers — this matches the browser path,
+    // which already prints correctly, so the native path uses the same
+    // pacing rather than slowing things down further.
     const chunkSize = 64;
+    const interChunkDelayMs = 15;
     for (let i = 0; i < outgoing.length; i += chunkSize) {
       const chunk = outgoing.slice(i, i + chunkSize);
 
@@ -266,7 +276,7 @@ export class ThermalPrinter {
       }
 
       // Micro-sleep to allow the printer's hardware buffer to process incoming bytes without dropping them
-      await new Promise(resolve => setTimeout(resolve, 15));
+      await new Promise(resolve => setTimeout(resolve, interChunkDelayMs));
     }
   }
 
