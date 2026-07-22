@@ -132,11 +132,14 @@ function byteEncodeRow(row: boolean[]): number[] {
 }
 
 function cmdPrintRow(row: boolean[]): number[] {
-  const rle = runLengthEncodeRow(row);
-  if (rle.length > CAT_PRINTER_WIDTH / 8) {
-    return packet(CMD.PRINT_ROW_UNCOMPRESSED, byteEncodeRow(row));
-  }
-  return packet(CMD.PRINT_ROW_RLE, rle);
+  // Always send RLE-compressed rows. Test prints showed the opposite of what
+  // the earlier comment here assumed: content that used RLE (the logo, made
+  // of long solid runs) printed solid and dark, while content that fell back
+  // to the plain uncompressed row command (busy/text rows) came out faint —
+  // and switching everything to uncompressed made even the logo faint too.
+  // That confirms the uncompressed row command is the weak one for this
+  // printer, not RLE.
+  return packet(CMD.PRINT_ROW_RLE, runLengthEncodeRow(row));
 }
 
 /**

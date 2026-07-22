@@ -40,13 +40,15 @@ differently than the on-screen preview, that's now fixed:
   included) as an image and prints that directly, instead of rebuilding the
   receipt from scratch as plain text. This is what was causing the logo to be
   missing and the layout to not match what's on screen.
-- **Faded/broken text**: rendering the receipt directly at the printer's
-  final resolution (384 dots wide) made small text only a few pixels tall,
-  so thin strokes broke apart into faded fragments (this is what showed up
-  in your test print — logo fine, text faded). Fixed by capturing at 3x that
-  resolution first, then smoothly downscaling before the black/white
-  conversion — this turns antialiased text into clean gray gradients that
-  print as solid, legible letters instead of sparse dots.
+- **Text still faded after the resolution fix, then the logo faded too**:
+  this printer has two ways to send a row of dots — a compressed (RLE) format
+  and a plain uncompressed one. Test prints showed the compressed format
+  (used for the logo, since it's mostly solid blocks) came out dark and
+  solid, while the plain uncompressed format (used as a fallback for
+  busy/text rows) came out faint. Switching everything to the uncompressed
+  format made even the logo faint too, confirming that format is the weak
+  one for this printer. Fixed by always using the compressed (RLE) row
+  format for every row, logo and text alike.
 
 Note: the **Quick Reprint** feature (reprinting a past receipt with adjusted
 amounts) still uses the older plain-text method, so it won't include the logo
