@@ -931,15 +931,36 @@ export default function App() {
       // rebuilding the receipt from scratch as plain text — this is what
       // keeps the printed layout matching the preview, and is what actually
       // lets the logo make it onto paper.
-      const captureScale = 384 / receiptPaperRef.current.offsetWidth;
-      const canvas = await html2canvas(receiptPaperRef.current, {
+      //
+      // Capture at a HIGHER resolution than the printer's final 384-dot
+      // width, then downscale with smoothing afterwards. Rendering straight
+      // at 384px makes small receipt text only a few pixels tall, so thin
+      // strokes fall apart into faded fragments. Supersampling first lets
+      // the browser anti-alias text properly, and the smoothed downscale
+      // turns that into clean gray gradients that survive the black/white
+      // threshold as solid, legible letters instead of broken dots.
+      const printerWidth = 384;
+      const superSampleFactor = 3;
+      const captureScale = (printerWidth * superSampleFactor) / receiptPaperRef.current.offsetWidth;
+      const hiResCanvas = await html2canvas(receiptPaperRef.current, {
         backgroundColor: '#ffffff',
         scale: captureScale,
         useCORS: true,
         logging: false,
       });
 
-      const combined = ThermalPrinter.canvasToEscPos(canvas);
+      const finalHeight = Math.round((hiResCanvas.height * printerWidth) / hiResCanvas.width);
+      const finalCanvas = document.createElement('canvas');
+      finalCanvas.width = printerWidth;
+      finalCanvas.height = finalHeight;
+      const finalCtx = finalCanvas.getContext('2d')!;
+      finalCtx.imageSmoothingEnabled = true;
+      finalCtx.imageSmoothingQuality = 'high';
+      finalCtx.fillStyle = '#fff';
+      finalCtx.fillRect(0, 0, printerWidth, finalHeight);
+      finalCtx.drawImage(hiResCanvas, 0, 0, hiResCanvas.width, hiResCanvas.height, 0, 0, printerWidth, finalHeight);
+
+      const combined = ThermalPrinter.canvasToEscPos(finalCanvas);
 
       await printer.print(combined);
       saveToHistory();

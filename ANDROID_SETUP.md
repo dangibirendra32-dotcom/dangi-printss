@@ -40,10 +40,13 @@ differently than the on-screen preview, that's now fixed:
   included) as an image and prints that directly, instead of rebuilding the
   receipt from scratch as plain text. This is what was causing the logo to be
   missing and the layout to not match what's on screen.
-- **Faded printing**: the black/white threshold used when converting images
-  for printing was too strict for thermal print heads, which lose fine detail.
-  It's now more generous, and thin lines/text get a small 1px thickening pass
-  so they don't disappear on paper.
+- **Faded/broken text**: rendering the receipt directly at the printer's
+  final resolution (384 dots wide) made small text only a few pixels tall,
+  so thin strokes broke apart into faded fragments (this is what showed up
+  in your test print — logo fine, text faded). Fixed by capturing at 3x that
+  resolution first, then smoothly downscaling before the black/white
+  conversion — this turns antialiased text into clean gray gradients that
+  print as solid, legible letters instead of sparse dots.
 
 Note: the **Quick Reprint** feature (reprinting a past receipt with adjusted
 amounts) still uses the older plain-text method, so it won't include the logo
