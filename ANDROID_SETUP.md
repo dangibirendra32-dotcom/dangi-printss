@@ -31,7 +31,25 @@ When it finishes (a few minutes), open the workflow run → scroll to
 `app-debug.apk` — copy it to your phone (or scan a QR code link to it) and
 install it (enable "install unknown apps" for your file manager/browser).
 
-## 3. Bluetooth printing: now supports both printer families
+## 4. Print quality fixes (fade / missing logo / text layout)
+
+If you tested printing and saw faded output, no logo, or text laid out
+differently than the on-screen preview, that's now fixed:
+
+- **Main "Print" button** now captures the actual on-screen receipt (logo
+  included) as an image and prints that directly, instead of rebuilding the
+  receipt from scratch as plain text. This is what was causing the logo to be
+  missing and the layout to not match what's on screen.
+- **Faded printing**: the black/white threshold used when converting images
+  for printing was too strict for thermal print heads, which lose fine detail.
+  It's now more generous, and thin lines/text get a small 1px thickening pass
+  so they don't disappear on paper.
+
+Note: the **Quick Reprint** feature (reprinting a past receipt with adjusted
+amounts) still uses the older plain-text method, so it won't include the logo
+yet — only the main Print button has been upgraded so far.
+
+## 5. Bluetooth printing: now supports both printer families
 
 The app detects what kind of printer you connect to and speaks its language
 automatically:

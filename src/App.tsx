@@ -51,6 +51,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import confetti from 'canvas-confetti';
 import * as pdfjsLib from 'pdfjs-dist';
+import html2canvas from 'html2canvas';
 // @ts-expect-error - Vite ?url imports are not natively typed in TypeScript config
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
@@ -112,6 +113,7 @@ export default function App() {
   const [pdfCanvas, setPdfCanvas] = useState<HTMLCanvasElement | null>(null);
   const scannerRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const receiptPaperRef = useRef<HTMLDivElement>(null);
 
   // --- Secure Authentication State ---
   const [isSecurityEnabled, setIsSecurityEnabled] = useState<boolean>(() => {
@@ -921,98 +923,23 @@ export default function App() {
     }
 
     try {
-      const cmds = ThermalPrinter.getCommands();
-      const chunks: Uint8Array[] = [];
-
-      chunks.push(cmds.INIT);
-      chunks.push(cmds.ALIGN_CENTER);
-      chunks.push(cmds.BOLD_ON);
-
-      if (data.type === 'PETROL') {
-        chunks.push(cmds.BOLD_ON);
-        chunks.push(ThermalPrinter.textToUint8("WELCOME!!!"));
-        chunks.push(ThermalPrinter.textToUint8(`${data.companyName.toUpperCase()}`));
-        chunks.push(ThermalPrinter.textToUint8(data.address));
-        chunks.push(ThermalPrinter.textToUint8(`TEL NO: ${data.petrolDetails?.telNo}`));
-        chunks.push(ThermalPrinter.textToUint8(`RECEIPT NO: ${data.petrolDetails?.receiptNo}`));
-        chunks.push(ThermalPrinter.textToUint8(`FCC ID: ${data.petrolDetails?.fccId}`));
-        chunks.push(ThermalPrinter.textToUint8(`FIP NO: ${data.petrolDetails?.fipNo}`));
-        chunks.push(ThermalPrinter.textToUint8(`NOZZLE NO: ${data.petrolDetails?.nozzleNo}`));
-        
-        chunks.push(cmds.ALIGN_LEFT);
-        chunks.push(ThermalPrinter.textToUint8(` `));
-        chunks.push(ThermalPrinter.textToUint8(`PRODUCT: ${data.petrolDetails?.product}`));
-        chunks.push(ThermalPrinter.textToUint8(`RATE/LTR: ${data.petrolDetails?.ratePerLtr.toFixed(2)}`));
-        chunks.push(ThermalPrinter.textToUint8(`AMOUNT: ${data.petrolDetails?.amount.toFixed(2)}`));
-        chunks.push(ThermalPrinter.textToUint8(`VOLUME(LTR): ${data.petrolDetails?.volumeLtr.toFixed(2)} lt`));
-        chunks.push(ThermalPrinter.textToUint8(` `));
-        chunks.push(ThermalPrinter.textToUint8(`VEH TYPE: ${data.petrolDetails?.vehType}`));
-        chunks.push(ThermalPrinter.textToUint8(`VEH NO: ${data.petrolDetails?.vehicleNumber}`));
-        chunks.push(ThermalPrinter.textToUint8(`CUSTOMER: ${data.petrolDetails?.customerName || ''}`));
-        chunks.push(ThermalPrinter.textToUint8(` `));
-        chunks.push(ThermalPrinter.textToUint8(`DATE: ${data.date} ${data.time}`));
-        chunks.push(ThermalPrinter.textToUint8(`MODE: ${data.paymentMode}`));
-        chunks.push(ThermalPrinter.textToUint8(`LST NO: ${data.petrolDetails?.lstNo}`));
-        chunks.push(ThermalPrinter.textToUint8(`VAT NO: ${data.petrolDetails?.vatNo}`));
-        chunks.push(ThermalPrinter.textToUint8(`ATTENDANT: ${data.petrolDetails?.attendantId}`));
-        chunks.push(cmds.BOLD_OFF);
-
-      } else {
-        chunks.push(ThermalPrinter.textToUint8(data.companyName.toUpperCase()));
-        chunks.push(cmds.BOLD_OFF);
-        chunks.push(ThermalPrinter.textToUint8(data.address));
-        chunks.push(ThermalPrinter.textToUint8(`Phone: ${data.phone}`));
-        if (data.showGst !== false && data.gstNumber) chunks.push(ThermalPrinter.textToUint8(`GST: ${data.gstNumber}`));
-        
-        chunks.push(cmds.ALIGN_LEFT);
-        chunks.push(ThermalPrinter.textToUint8(`--------------------------------`));
-        chunks.push(ThermalPrinter.textToUint8(`Date: ${data.date}   Time: ${data.time}`));
-        chunks.push(ThermalPrinter.textToUint8(`Bill No: ${data.billNumber}`));
-        chunks.push(ThermalPrinter.textToUint8(`--------------------------------`));
-        
-        // Header for items
-        chunks.push(ThermalPrinter.textToUint8(`ITEM            QTY    RATE   TOTAL`));
-        chunks.push(ThermalPrinter.textToUint8(`--------------------------------`));
-        
-        data.items.forEach(item => {
-          const namePart = item.name.substring(0, 15).padEnd(15);
-          const qtyPart = item.quantity.toString().padStart(3);
-          const ratePart = item.rate.toString().padStart(6);
-          const totalPart = item.total.toString().padStart(6);
-          chunks.push(ThermalPrinter.textToUint8(`${namePart} ${qtyPart} ${ratePart} ${totalPart}`));
-        });
-        
-        chunks.push(ThermalPrinter.textToUint8(`--------------------------------`));
-        chunks.push(cmds.ALIGN_RIGHT);
-        chunks.push(ThermalPrinter.textToUint8(`Subtotal: ${data.subtotal.toFixed(2)}`));
-        chunks.push(ThermalPrinter.textToUint8(`${data.taxLabel}: ${data.taxAmount.toFixed(2)}`));
-        chunks.push(cmds.BOLD_ON);
-        chunks.push(ThermalPrinter.textToUint8(`TOTAL: ${data.total.toFixed(2)}`));
-        chunks.push(cmds.BOLD_OFF);
+      if (!receiptPaperRef.current) {
+        throw new Error('Could not find the receipt preview to print.');
       }
-      
-      chunks.push(cmds.ALIGN_CENTER);
-      chunks.push(cmds.FEED_PAPER);
-      
-      if (data.type === 'PETROL') {
-        chunks.push(ThermalPrinter.textToUint8(`***************`));
-        chunks.push(ThermalPrinter.textToUint8(`Thank You! Visit Again`));
-        chunks.push(ThermalPrinter.textToUint8(`Save Fuel, Save Money.`));
-      } else {
-        chunks.push(ThermalPrinter.textToUint8(`Thank You! Visit Again`));
-      }
-      
-      chunks.push(cmds.FEED_PAPER);
-      chunks.push(cmds.CUT);
 
-      // Flatten chunks
-      let totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
-      let combined = new Uint8Array(totalLength);
-      let offset = 0;
-      for (const chunk of chunks) {
-        combined.set(chunk, offset);
-        offset += chunk.length;
-      }
+      // Capture exactly what's shown on screen (logo included) instead of
+      // rebuilding the receipt from scratch as plain text — this is what
+      // keeps the printed layout matching the preview, and is what actually
+      // lets the logo make it onto paper.
+      const captureScale = 384 / receiptPaperRef.current.offsetWidth;
+      const canvas = await html2canvas(receiptPaperRef.current, {
+        backgroundColor: '#ffffff',
+        scale: captureScale,
+        useCORS: true,
+        logging: false,
+      });
+
+      const combined = ThermalPrinter.canvasToEscPos(canvas);
 
       await printer.print(combined);
       saveToHistory();
@@ -2014,7 +1941,7 @@ export default function App() {
             <div className="bg-white p-4 pt-12 pb-24 shadow-[0_50px_100px_-20px_rgba(0,0,0,0.15)] rounded-t-[40px] rounded-b-[40px] w-full max-w-[320px] mx-auto overflow-hidden relative border-t-[10px] border-emerald-100">
                
               {/* Receipt Content -> Strictly 2 inches width emulation */}
-              <div className="receipt-paper font-mono text-[11px] leading-tight text-slate-800 antialiased mx-auto flex flex-col items-center">
+              <div ref={receiptPaperRef} className="receipt-paper font-mono text-[11px] leading-tight text-slate-800 antialiased mx-auto flex flex-col items-center">
                 {showPdfPreviewTab && pdfCroppedUrl ? (
                   <div className="w-full">
                     <div className="text-center font-bold text-[10px] text-emerald-600 border border-emerald-100 bg-emerald-50 py-1.5 rounded-xl mb-4 leading-normal select-none">

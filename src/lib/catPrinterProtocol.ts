@@ -193,7 +193,11 @@ export function canvasToCatPrinterRows(canvas: HTMLCanvasElement): boolean[][] {
   const sctx = sourceCanvas.getContext('2d')!;
   const imgData = sctx.getImageData(0, 0, w, h).data;
 
-  const rows: boolean[][] = [];
+  // Slightly generous threshold (was 185) — thermal print heads lose fine/light
+  // detail, so borderline gray pixels need to count as ink or the output fades.
+  const INK_THRESHOLD = 210;
+
+  const raw: boolean[][] = [];
   for (let y = 0; y < h; y++) {
     const row: boolean[] = new Array(CAT_PRINTER_WIDTH).fill(false);
     for (let x = 0; x < w; x++) {
@@ -202,9 +206,23 @@ export function canvasToCatPrinterRows(canvas: HTMLCanvasElement): boolean[][] {
       const g = imgData[idx + 1];
       const b = imgData[idx + 2];
       const a = imgData[idx + 3];
-      row[x] = a > 60 && (r + g + b) / 3 < 185;
+      row[x] = a > 60 && (r + g + b) / 3 < INK_THRESHOLD;
     }
-    rows.push(row);
+    raw.push(row);
+  }
+
+  // Dilate by 1px (any inked pixel also inks its 4-neighbors). This thickens
+  // thin text/line strokes so they don't disappear on print — a plain 1:1
+  // bilevel conversion of small text reliably prints faint/broken otherwise.
+  const rows: boolean[][] = raw.map(row => [...row]);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < CAT_PRINTER_WIDTH; x++) {
+      if (!raw[y][x]) continue;
+      if (x > 0) rows[y][x - 1] = true;
+      if (x < CAT_PRINTER_WIDTH - 1) rows[y][x + 1] = true;
+      if (y > 0) rows[y - 1][x] = true;
+      if (y < h - 1) rows[y + 1][x] = true;
+    }
   }
   return rows;
 }

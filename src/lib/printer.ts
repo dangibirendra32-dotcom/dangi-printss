@@ -211,6 +211,35 @@ export class ThermalPrinter {
       h % 256, Math.floor(h / 256)                   // yL, yH (vertical dots)
     ]);
 
+    // First pass: build a plain ink/no-ink map per pixel.
+    // Slightly generous threshold (210, not 185/255) plus a 1px dilation pass
+    // below — thermal print heads lose fine detail, so thin strokes and
+    // borderline-gray pixels need extra help or the print comes out faded.
+    const ink: Uint8Array = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const idx = (y * w + x) * 4;
+        const r = data[idx];
+        const g = data[idx + 1];
+        const b = data[idx + 2];
+        const a = data[idx + 3];
+        if (a > 60 && (r + g + b) / 3 < 210) {
+          ink[y * w + x] = 1;
+        }
+      }
+    }
+    // Dilate by 1px so thin text/line strokes survive thermal printing.
+    const dilated = new Uint8Array(ink);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (!ink[y * w + x]) continue;
+        if (x > 0) dilated[y * w + (x - 1)] = 1;
+        if (x < w - 1) dilated[y * w + (x + 1)] = 1;
+        if (y > 0) dilated[(y - 1) * w + x] = 1;
+        if (y < h - 1) dilated[(y + 1) * w + x] = 1;
+      }
+    }
+
     // Build image pixel bitmask body
     const body = new Uint8Array(widthBytes * h);
     let byteIdx = 0;
@@ -220,21 +249,8 @@ export class ThermalPrinter {
         let byteVal = 0;
         for (let bit = 0; bit < 8; bit++) {
           const x = xb * 8 + bit;
-          if (x < w) {
-            const idx = (y * w + x) * 4;
-            const r = data[idx];
-            const g = data[idx + 1];
-            const b = data[idx + 2];
-            const a = data[idx + 3];
-
-            // Consider it paper-ink (black) if:
-            // - Transparent pixels are skipped (treated as paper/white)
-            // - Grayscale brightness is lower than a threshold (185/255)
-            const isInk = (a > 60) && (((r + g + b) / 3) < 185);
-
-            if (isInk) {
-              byteVal |= (1 << (7 - bit)); // Set bit (high-bit on left, low-bit on right)
-            }
+          if (x < w && dilated[y * w + x]) {
+            byteVal |= (1 << (7 - bit)); // Set bit (high-bit on left, low-bit on right)
           }
         }
         body[byteIdx++] = byteVal;
