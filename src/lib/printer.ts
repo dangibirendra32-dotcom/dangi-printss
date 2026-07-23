@@ -26,15 +26,9 @@ import { BleClient, numbersToDataView } from '@capacitor-community/bluetooth-le'
 type PrinterType = 'escpos' | 'catprinter';
 
 export class ThermalPrinter {
-  // Web Bluetooth (browser) state
   private device: BluetoothDevice | null = null;
   private characteristic: BluetoothRemoteGATTCharacteristic | null = null;
 
-  // Native BLE (installed Android/iOS app) state — the WebView an installed
-  // Capacitor app runs in does not support the Web Bluetooth API at all, so
-  // a separate native plugin path is required for the app to actually be
-  // able to print once installed (this worked in the browser already; this
-  // is what makes it also work in the installed app).
   private nativeDeviceId: string | null = null;
   private nativeServiceUuid: string | null = null;
   private nativeCharUuid: string | null = null;
@@ -42,19 +36,18 @@ export class ThermalPrinter {
 
   private printerType: PrinterType = 'escpos';
 
-  // Common Thermal Printer Service UUIDs used by various brands (including HM-10, CC2541, ISSC, Avery, etc.)
   private static KNOWN_SERVICES = [
-    '000018f0-0000-1000-8000-00805f9b34fb', // Standard Printer Service
-    '0000ffe0-0000-1000-8000-00805f9b34fb', // Common BLE Serial (CC2541/HM-10 used in cheap thermal printers)
-    '0000ffe1-0000-1000-8000-00805f9b34fb', // Alternate BLE Serial Service
-    '0000ff00-0000-1000-8000-00805f9b34fb', // Chinese generic ESC/POS printers
-    '0000ff01-0000-1000-8000-00805f9b34fb', // Some thermal printers
-    '0000fee7-0000-1000-8000-00805f9b34fb', // Tencent/WeChat IoT
-    '00004953-5343-fe7d-4158-706b65746368', // Microchip ISSC SPP
-    '49535343-fe7d-4158-706b-657463684953', // Microchip ISSC SPP alternate
-    'e7e1a000-a0f2-11e1-b201-0002767a551b', // Avery Dennison
-    '00001101-0000-1000-8000-00805f9b34fb', // Classic SPP BLE bridge
-    '0000180a-0000-1000-8000-00805f9b34fb', // Device Info Service
+    '000018f0-0000-1000-8000-00805f9b34fb',
+    '0000ffe0-0000-1000-8000-00805f9b34fb',
+    '0000ffe1-0000-1000-8000-00805f9b34fb',
+    '0000ff00-0000-1000-8000-00805f9b34fb',
+    '0000ff01-0000-1000-8000-00805f9b34fb',
+    '0000fee7-0000-1000-8000-00805f9b34fb',
+    '00004953-5343-fe7d-4158-706b65746368',
+    '49535343-fe7d-4158-706b-657463684953',
+    'e7e1a000-a0f2-11e1-b201-0002767a551b',
+    '00001101-0000-1000-8000-00805f9b34fb',
+    '0000180a-0000-1000-8000-00805f9b34fb',
   ];
 
   async connect() {
@@ -70,9 +63,6 @@ export class ThermalPrinter {
 
       const allServices = [...CAT_PRINTER_SERVICE_UUIDS, ...ThermalPrinter.KNOWN_SERVICES];
 
-      // `services: []` (no required filter) plus `optionalServices` mirrors
-      // the browser's acceptAllDevices behavior — shows every nearby BLE
-      // device, not just ones already known to advertise these UUIDs.
       const device = await BleClient.requestDevice({
         services: [],
         optionalServices: allServices,
@@ -130,12 +120,6 @@ export class ThermalPrinter {
       this.nativeDeviceId = device.deviceId;
       this.nativeServiceUuid = matchedService.uuid;
       this.nativeCharUuid = characteristic.uuid;
-      // Prefer fast, unacknowledged writes when available — matches the
-      // browser path (Web Bluetooth's writeValueWithoutResponse), which
-      // already prints correctly. Waiting for an acknowledgment on every
-      // packet slows the data stream enough for the thermal print head to
-      // cool between chunks, which produces a uniformly faded print rather
-      // than fixing anything.
       this.nativeWriteWithoutResponse = !!characteristic.properties.writeWithoutResponse;
 
       return true;
@@ -147,11 +131,8 @@ export class ThermalPrinter {
 
   private async connectWeb(): Promise<boolean> {
     try {
-      // Try cat-printer service UUIDs first (they're specific/unambiguous),
-      // then fall back to the broader generic ESC/POS serial UUID list.
       const allServices = [...CAT_PRINTER_SERVICE_UUIDS, ...ThermalPrinter.KNOWN_SERVICES];
 
-      // Allow searching for any bluetooth device and specify known print services as optional so we can access them
       this.device = await navigator.bluetooth.requestDevice({
         acceptAllDevices: true,
         optionalServices: allServices,
@@ -163,7 +144,6 @@ export class ThermalPrinter {
       let service: BluetoothRemoteGATTService | null = null;
       this.printerType = 'escpos';
 
-      // Try cat-printer services first
       for (const serviceUuid of CAT_PRINTER_SERVICE_UUIDS) {
         try {
           service = await server.getPrimaryService(serviceUuid);
@@ -177,7 +157,6 @@ export class ThermalPrinter {
         }
       }
 
-      // Then fall back to standard ESC/POS-style services
       if (!service) {
         for (const serviceUuid of ThermalPrinter.KNOWN_SERVICES) {
           try {
@@ -192,7 +171,6 @@ export class ThermalPrinter {
         }
       }
 
-      // Fallback: if we couldn't get a specific known service, try to get all services if permitted
       if (!service) {
         try {
           const services = await server.getPrimaryServices();
@@ -209,13 +187,11 @@ export class ThermalPrinter {
       const characteristics = await service.getCharacteristics();
 
       if (this.printerType === 'catprinter') {
-        // Prefer the known TX characteristic for cat printers, fall back to generic search.
         this.characteristic =
           characteristics?.find(c => c.uuid === CAT_PRINTER_TX_CHARACTERISTIC_UUID) ||
           characteristics?.find(c => c.properties.write || c.properties.writeWithoutResponse) ||
           null;
       } else {
-        // Try to find a writable characteristic
         this.characteristic = characteristics?.find(c => c.properties.write || c.properties.writeWithoutResponse) || null;
       }
 
@@ -240,23 +216,15 @@ export class ThermalPrinter {
     let outgoing = data;
 
     if (this.printerType === 'catprinter') {
-      // Cat printers don't understand ESC/POS at all — rasterize whatever
-      // ESC/POS stream the app built (text receipt or already-a-raster PDF
-      // crop) into a canvas, then re-encode it as cat-printer commands.
       const canvas = ThermalPrinter.escPosBytesToCanvas(data);
-      // Use higher energy for better print quality on cat printers
       const rows = canvasToCatPrinterRows(canvas, true);
-      // Use maximum energy (0xFFFF) for best results
-      outgoing = buildCatPrinterImageCommands(rows, 0xffff);
+      outgoing = buildCatPrinterImageCommands(rows, 0xFFFF);
     }
 
-    // Most mini printers have extremely small BLE buffers (often 20 bytes up to 128 bytes).
-    // Using 64-byte chunks with a 15ms sleep is the sweet spot for maximum
-    // reliability across generic printers — this matches the browser path,
-    // which already prints correctly, so the native path uses the same
-    // pacing rather than slowing things down further.
-    const chunkSize = 64;
-    const interChunkDelayMs = 15;
+    // Optimized for mobile BLE
+    const chunkSize = 128;
+    const interChunkDelayMs = 20;
+
     for (let i = 0; i < outgoing.length; i += chunkSize) {
       const chunk = outgoing.slice(i, i + chunkSize);
 
@@ -277,7 +245,6 @@ export class ThermalPrinter {
         }
       }
 
-      // Micro-sleep to allow the printer's hardware buffer to process incoming bytes without dropping them
       await new Promise(resolve => setTimeout(resolve, interChunkDelayMs));
     }
   }
@@ -291,22 +258,17 @@ export class ThermalPrinter {
       BOLD_ON: new Uint8Array([0x1b, 0x45, 0x01]),
       BOLD_OFF: new Uint8Array([0x1b, 0x45, 0x00]),
       TEXT_SIZE_NORMAL: new Uint8Array([0x1d, 0x21, 0x00]),
-      TEXT_SIZE_LARGE: new Uint8Array([0x1d, 0x21, 0x11]), // Double height & width
-      FEED_PAPER: new Uint8Array([0x1b, 0x64, 0x03]), // Feed 3 lines
+      TEXT_SIZE_LARGE: new Uint8Array([0x1d, 0x21, 0x11]),
+      FEED_PAPER: new Uint8Array([0x1b, 0x64, 0x03]),
       CUT: new Uint8Array([0x1d, 0x56, 0x00]),
     };
   }
 
-  // Convert string to Uint8Array (standard ASCII/CP850)
   static textToUint8(text: string) {
     const encoder = new TextEncoder();
     return encoder.encode(text + '\n');
   }
 
-  /**
-   * Converts a canvas into an ESC/POS raster graphic command (GS v 0).
-   * Generates a precise binary monochrome bitmask where 1 is black and 0 is white.
-   */
   static canvasToEscPos(canvas: HTMLCanvasElement): Uint8Array {
     const ctx = canvas.getContext('2d');
     if (!ctx) return new Uint8Array();
@@ -316,24 +278,17 @@ export class ThermalPrinter {
     const imgData = ctx.getImageData(0, 0, w, h);
     const data = imgData.data;
 
-    // Calculate width in bytes (each byte holds 8 pixels horizontally)
     const widthBytes = Math.ceil(w / 8);
 
-    // ESC/POS GS v 0 m xL xH yL yH d1...dk
-    // Initialize standard printer setting, line spacing & alignment center/left
     const header = new Uint8Array([
-      0x1b, 0x40,           // ESC @ (Initialize printer)
-      0x1b, 0x61, 0x00,     // ESC a 0 (Align Left)
-      0x1b, 0x33, 0x18,     // ESC 3 24 (Set line spacing to 24 dots)
-      0x1d, 0x76, 0x30, 0,  // GS v 0 0 (Raster image normal mode)
-      widthBytes % 256, Math.floor(widthBytes / 256), // xL, xH (horizontal bytes)
-      h % 256, Math.floor(h / 256)                   // yL, yH (vertical dots)
+      0x1b, 0x40,
+      0x1b, 0x61, 0x00,
+      0x1b, 0x33, 0x18,
+      0x1d, 0x76, 0x30, 0,
+      widthBytes % 256, Math.floor(widthBytes / 256),
+      h % 256, Math.floor(h / 256)
     ]);
 
-    // First pass: build a plain ink/no-ink map per pixel.
-    // Slightly generous threshold (210, not 185/255) plus a 1px dilation pass
-    // below — thermal print heads lose fine detail, so thin strokes and
-    // borderline-gray pixels need extra help or the print comes out faded.
     const ink: Uint8Array = new Uint8Array(w * h);
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
@@ -347,19 +302,23 @@ export class ThermalPrinter {
         }
       }
     }
-    // Dilate by 1px so thin text/line strokes survive thermal printing.
+
     const dilated = new Uint8Array(ink);
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         if (!ink[y * w + x]) continue;
-        if (x > 0) dilated[y * w + (x - 1)] = 1;
-        if (x < w - 1) dilated[y * w + (x + 1)] = 1;
-        if (y > 0) dilated[(y - 1) * w + x] = 1;
-        if (y < h - 1) dilated[(y + 1) * w + x] = 1;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const ny = y + dy;
+            const nx = x + dx;
+            if (ny >= 0 && ny < h && nx >= 0 && nx < w) {
+              dilated[ny * w + nx] = 1;
+            }
+          }
+        }
       }
     }
 
-    // Build image pixel bitmask body
     const body = new Uint8Array(widthBytes * h);
     let byteIdx = 0;
 
@@ -369,21 +328,19 @@ export class ThermalPrinter {
         for (let bit = 0; bit < 8; bit++) {
           const x = xb * 8 + bit;
           if (x < w && dilated[y * w + x]) {
-            byteVal |= (1 << (7 - bit)); // Set bit (high-bit on left, low-bit on right)
+            byteVal |= (1 << (7 - bit));
           }
         }
         body[byteIdx++] = byteVal;
       }
     }
 
-    // Feed lines & cut paper command
     const footer = new Uint8Array([
-      0x1b, 0x32,       // ESC 2 (Reset line spacing default)
-      0x1b, 0x64, 0x03, // ESC d 3 (Feed 3 lines)
-      0x1d, 0x56, 0x00  // GS V 0 (Cut paper)
+      0x1b, 0x32,
+      0x1b, 0x64, 0x03,
+      0x1d, 0x56, 0x00
     ]);
 
-    // Concatenate all commands
     const finalCmd = new Uint8Array(header.length + body.length + footer.length);
     finalCmd.set(header, 0);
     finalCmd.set(body, header.length);
@@ -392,14 +349,7 @@ export class ThermalPrinter {
     return finalCmd;
   }
 
-  /**
-   * Interprets an ESC/POS byte stream (as produced by getCommands()+textToUint8(),
-   * or by canvasToEscPos()) and renders it onto an offscreen canvas, so it can be
-   * re-encoded for printers (like cat printers) that only accept raster images.
-   */
   static escPosBytesToCanvas(data: Uint8Array): HTMLCanvasElement {
-    // Case 1: this is already a canvasToEscPos() raster payload — decode it
-    // directly for a lossless roundtrip instead of re-parsing as text.
     if (
       data.length > 16 &&
       data[0] === 0x1b && data[1] === 0x40 &&
@@ -440,9 +390,6 @@ export class ThermalPrinter {
       return canvas;
     }
 
-    // Case 2: a text-mode ESC/POS stream — parse the small set of commands
-    // this app actually emits (INIT/ALIGN/BOLD/SIZE/FEED/CUT) plus the
-    // newline-terminated text lines between them, then draw them.
     const cmds = ThermalPrinter.getCommands();
     const matchers: { bytes: Uint8Array; apply: (s: DrawState) => void }[] = [
       { bytes: cmds.INIT, apply: () => {} },
@@ -475,8 +422,6 @@ export class ThermalPrinter {
       const text = new TextDecoder().decode(new Uint8Array(textBuf));
       textBuf = [];
       const lines = text.split('\n');
-      // textToUint8() always appends a trailing \n, so split() leaves one
-      // trailing empty string per line pushed — drop only that artifact.
       if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
       for (const line of lines) {
         state.ops.push({ kind: 'text', text: line, align: state.align, bold: state.bold, large: state.large });
@@ -503,20 +448,18 @@ export class ThermalPrinter {
     }
     flushText();
 
-    // Render the parsed operations onto a canvas.
     const width = CAT_PRINTER_WIDTH;
-    const normalFontSize = 20;
-    const largeFontSize = 34;
-    const normalLineHeight = 26;
-    const largeLineHeight = 42;
-    const feedLineHeight = 18;
+    const normalFontSize = 22;
+    const largeFontSize = 36;
+    const normalLineHeight = 28;
+    const largeLineHeight = 44;
+    const feedLineHeight = 20;
 
-    // First pass: measure total height.
-    let totalHeight = 20; // top padding
+    let totalHeight = 20;
     for (const op of state.ops) {
       totalHeight += op.kind === 'feed' ? feedLineHeight : op.large ? largeLineHeight : normalLineHeight;
     }
-    totalHeight += 20; // bottom padding
+    totalHeight += 20;
 
     const canvas = document.createElement('canvas');
     canvas.width = width;
@@ -547,4 +490,3 @@ export class ThermalPrinter {
     return canvas;
   }
 }
-

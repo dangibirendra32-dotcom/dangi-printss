@@ -9,8 +9,9 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "cap:sync": "cap sync android",
-    "cap:open": "cap open android"
+    "cap:sync": "npx cap sync android",
+    "cap:open": "npx cap open android",
+    "cap:copy": "npx cap copy android"
   },
   "dependencies": {
     "@capacitor-community/bluetooth-le": "^7.0.0",
@@ -18,13 +19,13 @@
     "@capacitor/core": "^7.0.0",
     "@google/genai": "^1.29.0",
     "@tailwindcss/vite": "^4.1.14",
-    "html2canvas-pro": "^1.5.8",
     "@types/canvas-confetti": "^1.9.0",
     "@types/web-bluetooth": "^0.0.21",
     "@vitejs/plugin-react": "^5.0.4",
     "canvas-confetti": "^1.9.4",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
+    "html2canvas-pro": "^1.5.8",
     "html5-qrcode": "^2.3.8",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
@@ -42,7 +43,6 @@
     "esbuild": "^0.25.0",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
-    "typescript": "~5.8.2",
-    "vite": "^6.2.3"
+    "typescript": "~5.8.2"
   }
 }

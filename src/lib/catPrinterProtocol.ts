@@ -38,8 +38,7 @@ const CMD = {
   PRINT_ROW_RLE: 0xbf,
 };
 
-// CRC-8 lookup table used by the printer's checksum (matches the table
-// reverse-engineered from the official vendor app).
+// CRC-8 lookup table used by the printer's checksum
 const CHECKSUM_TABLE: number[] = [
   0, 7, 14, 9, 28, 27, 18, 21, 56, 63, 54, 49, 36, 35, 42, 45,
   112, 119, 126, 121, 108, 107, 98, 101, 72, 79, 70, 65, 84, 83, 90, 93,
@@ -93,7 +92,6 @@ const CMD_SET_PAPER = packet(CMD.SET_PAPER, [48, 0]);
 const CMD_LATTICE_START = packet(CMD.LATTICE, [0xaa, 0x55, 0x17, 0x38, 0x44, 0x5f, 0x5f, 0x5f, 0x44, 0x38, 0x2c]);
 const CMD_LATTICE_END = packet(CMD.LATTICE, [0xaa, 0x55, 0x17, 0, 0, 0, 0, 0, 0, 0, 0x17]);
 
-// Run-length encoding: each byte packs a value bit (0/1) + a run length (0-127).
 function runLengthEncodeRow(row: boolean[]): number[] {
   const out: number[] = [];
   let count = 0;
@@ -119,33 +117,10 @@ function runLengthEncodeRow(row: boolean[]): number[] {
   return out;
 }
 
-function byteEncodeRow(row: boolean[]): number[] {
-  const out: number[] = [];
-  for (let i = 0; i < row.length; i += 8) {
-    let byte = 0;
-    for (let bit = 0; bit < 8; bit++) {
-      if (row[i + bit]) byte |= 1 << bit;
-    }
-    out.push(byte);
-  }
-  return out;
-}
-
 function cmdPrintRow(row: boolean[]): number[] {
-  // Always send RLE-compressed rows. Test prints showed the opposite of what
-  // the earlier comment here assumed: content that used RLE (the logo, made
-  // of long solid runs) printed solid and dark, while content that fell back
-  // to the plain uncompressed row command (busy/text rows) came out faint —
-  // and switching everything to uncompressed made even the logo faint too.
-  // That confirms the uncompressed row command is the weak one for this
-  // printer, not RLE.
   return packet(CMD.PRINT_ROW_RLE, runLengthEncodeRow(row));
 }
 
-/**
- * Builds the full command stream to print a 1-bit image, `rows` deep,
- * each row `CAT_PRINTER_WIDTH` pixels wide (true = black ink).
- */
 export function buildCatPrinterImageCommands(rows: boolean[][], energy = 0xffff): Uint8Array {
   const packets: number[][] = [
     CMD_GET_DEV_STATE,
@@ -168,17 +143,12 @@ export function buildCatPrinterImageCommands(rows: boolean[][], energy = 0xffff)
   return new Uint8Array(packets.flat());
 }
 
-/**
- * Converts a canvas into the boolean pixel rows the cat-printer protocol
- * expects, scaling/cropping the width to CAT_PRINTER_WIDTH if needed.
- */
-export function canvasToCatPrinterRows(canvas: HTMLCanvasElement, energyBoost: boolean = true): boolean[][] {
+export function canvasToCatPrinterRows(canvas: HTMLCanvasElement, darkMode: boolean = true): boolean[][] {
   const ctx = canvas.getContext('2d');
   if (!ctx) return [];
 
   let sourceCanvas = canvas;
   if (canvas.width !== CAT_PRINTER_WIDTH) {
-    // Scale to match the printer's fixed dot width, preserving aspect ratio.
     const scaled = document.createElement('canvas');
     scaled.width = CAT_PRINTER_WIDTH;
     scaled.height = Math.round((canvas.height * CAT_PRINTER_WIDTH) / canvas.width);
@@ -196,10 +166,9 @@ export function canvasToCatPrinterRows(canvas: HTMLCanvasElement, energyBoost: b
   const sctx = sourceCanvas.getContext('2d')!;
   const imgData = sctx.getImageData(0, 0, w, h).data;
 
-  // More aggressive threshold for cat printers - they need darker pixels
-  const INK_THRESHOLD = 210; // Reduced from 225 for darker output
+  // Lower threshold for darker output
+  const INK_THRESHOLD = 200;
 
-  // First pass: extract raw pixels
   const raw: boolean[][] = [];
   for (let y = 0; y < h; y++) {
     const row: boolean[] = new Array(CAT_PRINTER_WIDTH).fill(false);
@@ -209,53 +178,51 @@ export function canvasToCatPrinterRows(canvas: HTMLCanvasElement, energyBoost: b
       const g = imgData[idx + 1];
       const b = imgData[idx + 2];
       const a = imgData[idx + 3];
-      // Use stricter threshold for better contrast
-      row[x] = a > 60 && (r + g + b) / 3 < INK_THRESHOLD;
+      const brightness = (r + g + b) / 3;
+      row[x] = a > 60 && brightness < INK_THRESHOLD;
     }
     raw.push(row);
   }
 
-  // Enhanced dilation with multiple passes for better print quality
   let rows = raw.map(row => [...row]);
 
-  // First pass: 8-neighbor dilation (including diagonals)
-  const dilated = rows.map(row => [...row]);
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < CAT_PRINTER_WIDTH; x++) {
-      if (!raw[y][x]) continue;
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          const ny = y + dy;
-          const nx = x + dx;
-          if (ny >= 0 && ny < h && nx >= 0 && nx < CAT_PRINTER_WIDTH) {
-            dilated[ny][nx] = true;
-          }
-        }
-      }
-    }
-  }
-
-  // Second pass: extra thickening for better readability
-  if (energyBoost) {
-    rows = dilated.map(row => [...row]);
+  // Multiple dilation passes for thicker text
+  for (let pass = 0; pass < 2; pass++) {
+    const current = pass === 0 ? raw : rows;
+    const next = current.map(row => [...row]);
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < CAT_PRINTER_WIDTH; x++) {
-        if (!dilated[y][x]) continue;
-        // Extend to 2 pixels in all directions for thicker lines
-        for (let dy = -2; dy <= 2; dy++) {
-          for (let dx = -2; dx <= 2; dx++) {
+        if (!current[y][x]) continue;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
             const ny = y + dy;
             const nx = x + dx;
             if (ny >= 0 && ny < h && nx >= 0 && nx < CAT_PRINTER_WIDTH) {
-              rows[ny][nx] = true;
+              next[ny][nx] = true;
             }
           }
         }
       }
     }
-  } else {
-    rows = dilated;
+    rows = next;
   }
 
-  return rows;
+  // Extra thickening for better readability
+  const final = rows.map(row => [...row]);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < CAT_PRINTER_WIDTH; x++) {
+      if (!rows[y][x]) continue;
+      for (let dy = -2; dy <= 2; dy++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          const ny = y + dy;
+          const nx = x + dx;
+          if (ny >= 0 && ny < h && nx >= 0 && nx < CAT_PRINTER_WIDTH) {
+            final[ny][nx] = true;
+          }
+        }
+      }
+    }
+  }
+
+  return final;
 }
