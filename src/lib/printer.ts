@@ -244,8 +244,10 @@ export class ThermalPrinter {
       // ESC/POS stream the app built (text receipt or already-a-raster PDF
       // crop) into a canvas, then re-encode it as cat-printer commands.
       const canvas = ThermalPrinter.escPosBytesToCanvas(data);
-      const rows = canvasToCatPrinterRows(canvas);
-      outgoing = buildCatPrinterImageCommands(rows);
+      // Use higher energy for better print quality on cat printers
+      const rows = canvasToCatPrinterRows(canvas, true);
+      // Use maximum energy (0xFFFF) for best results
+      outgoing = buildCatPrinterImageCommands(rows, 0xffff);
     }
 
     // Most mini printers have extremely small BLE buffers (often 20 bytes up to 128 bytes).

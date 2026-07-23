@@ -172,7 +172,7 @@ export function buildCatPrinterImageCommands(rows: boolean[][], energy = 0xffff)
  * Converts a canvas into the boolean pixel rows the cat-printer protocol
  * expects, scaling/cropping the width to CAT_PRINTER_WIDTH if needed.
  */
-export function canvasToCatPrinterRows(canvas: HTMLCanvasElement): boolean[][] {
+export function canvasToCatPrinterRows(canvas: HTMLCanvasElement, energyBoost: boolean = true): boolean[][] {
   const ctx = canvas.getContext('2d');
   if (!ctx) return [];
 
@@ -196,10 +196,10 @@ export function canvasToCatPrinterRows(canvas: HTMLCanvasElement): boolean[][] {
   const sctx = sourceCanvas.getContext('2d')!;
   const imgData = sctx.getImageData(0, 0, w, h).data;
 
-  // Slightly generous threshold — thermal print heads lose fine/light detail,
-  // so borderline gray pixels need to count as ink or the output fades.
-  const INK_THRESHOLD = 225;
+  // More aggressive threshold for cat printers - they need darker pixels
+  const INK_THRESHOLD = 210; // Reduced from 225 for darker output
 
+  // First pass: extract raw pixels
   const raw: boolean[][] = [];
   for (let y = 0; y < h; y++) {
     const row: boolean[] = new Array(CAT_PRINTER_WIDTH).fill(false);
@@ -209,16 +209,17 @@ export function canvasToCatPrinterRows(canvas: HTMLCanvasElement): boolean[][] {
       const g = imgData[idx + 1];
       const b = imgData[idx + 2];
       const a = imgData[idx + 3];
+      // Use stricter threshold for better contrast
       row[x] = a > 60 && (r + g + b) / 3 < INK_THRESHOLD;
     }
     raw.push(row);
   }
 
-  // Dilate using the full 8-neighbor (including diagonals) rather than just
-  // the 4 orthogonal neighbors. This thickens thin text/line strokes so they
-  // don't disappear on print, without adding any extra rows/paper length —
-  // it only changes which existing pixels count as ink, not the image size.
-  const rows: boolean[][] = raw.map(row => [...row]);
+  // Enhanced dilation with multiple passes for better print quality
+  let rows = raw.map(row => [...row]);
+
+  // First pass: 8-neighbor dilation (including diagonals)
+  const dilated = rows.map(row => [...row]);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < CAT_PRINTER_WIDTH; x++) {
       if (!raw[y][x]) continue;
@@ -227,11 +228,34 @@ export function canvasToCatPrinterRows(canvas: HTMLCanvasElement): boolean[][] {
           const ny = y + dy;
           const nx = x + dx;
           if (ny >= 0 && ny < h && nx >= 0 && nx < CAT_PRINTER_WIDTH) {
-            rows[ny][nx] = true;
+            dilated[ny][nx] = true;
           }
         }
       }
     }
   }
+
+  // Second pass: extra thickening for better readability
+  if (energyBoost) {
+    rows = dilated.map(row => [...row]);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < CAT_PRINTER_WIDTH; x++) {
+        if (!dilated[y][x]) continue;
+        // Extend to 2 pixels in all directions for thicker lines
+        for (let dy = -2; dy <= 2; dy++) {
+          for (let dx = -2; dx <= 2; dx++) {
+            const ny = y + dy;
+            const nx = x + dx;
+            if (ny >= 0 && ny < h && nx >= 0 && nx < CAT_PRINTER_WIDTH) {
+              rows[ny][nx] = true;
+            }
+          }
+        }
+      }
+    }
+  } else {
+    rows = dilated;
+  }
+
   return rows;
 }

@@ -97,13 +97,20 @@ There's also a known, unresolved community issue with these printers: even a
 byte-perfect reimplementation of the protocol tends to print lighter than the
 official vendor app, and nobody has published why.
 
-To get darker output **without** using more paper, the fix is now purely in
-image processing: borderline gray pixels count as ink more readily, and thin
-strokes get thickened using all 8 surrounding pixels (not just the 4
-above/below/left/right) — this bolds up text and lines without changing the
-receipt's length at all. (An earlier version of this fix tried doubling paper
-length for extra darkness — that's been removed per your request to keep
-paper usage the same.)
+To get darker output **without** using more paper, the fix is in image
+processing: strokes now get thickened in two stages — a 1px pass using all
+8 surrounding pixels, then an extra 2px-radius pass on top for even bolder
+lines. This doesn't change the receipt's length at all. Heads up: this is a
+fairly strong amount of thickening for a printer this narrow (384 dots), so
+if small text starts looking blobby or letters start merging together,
+that's the trade-off — let me know and I can dial it back.
+
+On top of that, the main Print button now captures the receipt at 4x
+resolution (up from 3x) before downscaling, and applies a hard black/white
+contrast pass to the final image before sending it to the printer — pixels
+darker than mid-gray become pure black, everything else becomes pure white.
+Combined with the stroke thickening above, this should meaningfully close
+the remaining darkness gap.
 
 ## Notes
 - The workflow builds a **debug** APK (unsigned, fine for testing/sideloading).

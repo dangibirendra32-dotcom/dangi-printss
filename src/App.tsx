@@ -940,13 +940,22 @@ export default function App() {
       // turns that into clean gray gradients that survive the black/white
       // threshold as solid, legible letters instead of broken dots.
       const printerWidth = 384;
-      const superSampleFactor = 3;
+      // Use even higher supersampling for better quality on mobile
+      const superSampleFactor = 4; // Increased from 3
       const captureScale = (printerWidth * superSampleFactor) / receiptPaperRef.current.offsetWidth;
       const hiResCanvas = await html2canvas(receiptPaperRef.current, {
         backgroundColor: '#ffffff',
         scale: captureScale,
         useCORS: true,
         logging: false,
+        // Add these options for better quality
+        onclone: (clonedDoc) => {
+          // Ensure the receipt is fully rendered
+          const receipt = clonedDoc.querySelector('.receipt-paper');
+          if (receipt) {
+            (receipt as HTMLElement).style.transform = 'none';
+          }
+        }
       });
 
       const finalHeight = Math.round((hiResCanvas.height * printerWidth) / hiResCanvas.width);
@@ -959,6 +968,22 @@ export default function App() {
       finalCtx.fillStyle = '#fff';
       finalCtx.fillRect(0, 0, printerWidth, finalHeight);
       finalCtx.drawImage(hiResCanvas, 0, 0, hiResCanvas.width, hiResCanvas.height, 0, 0, printerWidth, finalHeight);
+
+      // Apply contrast enhancement for better print quality
+      const imageData = finalCtx.getImageData(0, 0, finalCanvas.width, finalCanvas.height);
+      const pixels = imageData.data;
+      for (let i = 0; i < pixels.length; i += 4) {
+        // Increase contrast
+        const r = pixels[i];
+        const g = pixels[i + 1];
+        const b = pixels[i + 2];
+        const avg = (r + g + b) / 3;
+        const newVal = avg < 128 ? 0 : 255;
+        pixels[i] = newVal;
+        pixels[i + 1] = newVal;
+        pixels[i + 2] = newVal;
+      }
+      finalCtx.putImageData(imageData, 0, 0);
 
       const combined = ThermalPrinter.canvasToEscPos(finalCanvas);
 
