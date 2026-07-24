@@ -19,6 +19,8 @@ import {
   CAT_PRINTER_WIDTH,
   buildCatPrinterImageCommands,
   canvasToCatPrinterRows,
+  ENERGY_LEVELS,
+  DEFAULT_ENERGY,
 } from './catPrinterProtocol';
 import { Capacitor } from '@capacitor/core';
 import { BleClient, numbersToDataView } from '@capacitor-community/bluetooth-le';
@@ -36,6 +38,9 @@ export class ThermalPrinter {
 
   private printerType: PrinterType = 'escpos';
 
+  // Energy level for cat printers - adjustable
+  private catPrinterEnergy: number = DEFAULT_ENERGY;
+
   private static KNOWN_SERVICES = [
     '000018f0-0000-1000-8000-00805f9b34fb',
     '0000ffe0-0000-1000-8000-00805f9b34fb',
@@ -49,6 +54,49 @@ export class ThermalPrinter {
     '00001101-0000-1000-8000-00805f9b34fb',
     '0000180a-0000-1000-8000-00805f9b34fb',
   ];
+
+  // Method to set energy level for cat printers
+  setCatPrinterEnergy(energy: number) {
+    // Validate energy level
+    const validEnergies = Object.values(ENERGY_LEVELS);
+    if (!validEnergies.includes(energy)) {
+      throw new Error(`Invalid energy level: ${energy}. Valid values: ${validEnergies.map(e => e.toString(16)).join(', ')}`);
+    }
+    this.catPrinterEnergy = energy;
+    console.log(`Cat printer energy set to: ${energy.toString(16)}`);
+  }
+
+  // Get current energy level
+  getCatPrinterEnergy(): number {
+    return this.catPrinterEnergy;
+  }
+
+  // OPTIMIZATION 10: Add disconnect method
+  async disconnect() {
+    if (Capacitor.isNativePlatform()) {
+      if (this.nativeDeviceId) {
+        try {
+          await BleClient.disconnect(this.nativeDeviceId);
+        } catch (error) {
+          console.error('Disconnect error:', error);
+        }
+        this.nativeDeviceId = null;
+        this.nativeServiceUuid = null;
+        this.nativeCharUuid = null;
+      }
+    } else {
+      if (this.device) {
+        try {
+          this.device.gatt?.disconnect();
+        } catch (error) {
+          console.error('Disconnect error:', error);
+        }
+        this.device = null;
+        this.characteristic = null;
+      }
+    }
+    this.printerType = 'escpos';
+  }
 
   async connect() {
     if (Capacitor.isNativePlatform()) {
@@ -188,7 +236,7 @@ export class ThermalPrinter {
 
       if (this.printerType === 'catprinter') {
         this.characteristic =
-          characteristics?.find(c => c.uuid === CAT_PRINTER_TX_CHARACTERISTIC_UUID) ||
+          characteristics?.find(c => c.uuid.toLowerCase() === CAT_PRINTER_TX_CHARACTERISTIC_UUID.toLowerCase()) ||
           characteristics?.find(c => c.properties.write || c.properties.writeWithoutResponse) ||
           null;
       } else {
@@ -217,13 +265,16 @@ export class ThermalPrinter {
 
     if (this.printerType === 'catprinter') {
       const canvas = ThermalPrinter.escPosBytesToCanvas(data);
-      const rows = canvasToCatPrinterRows(canvas, true);
-      outgoing = buildCatPrinterImageCommands(rows, 0xFFFF);
+      const rows = canvasToCatPrinterRows(canvas);
+      // Use the configured energy level
+      outgoing = buildCatPrinterImageCommands(rows, this.catPrinterEnergy);
+      console.log(`Printing with energy: ${this.catPrinterEnergy.toString(16)}`);
     }
 
-    // Optimized for mobile BLE
-    const chunkSize = 128;
-    const interChunkDelayMs = 20;
+    // OPTIMIZATION 4: Safer chunk size for BLE compatibility
+    const chunkSize = 128; // Changed from 180 for better compatibility
+    // OPTIMIZATION 5: Moderate delay for reliable printing
+    const interChunkDelayMs = 20; // Changed from 10ms for reliability
 
     for (let i = 0; i < outgoing.length; i += chunkSize) {
       const chunk = outgoing.slice(i, i + chunkSize);
@@ -245,6 +296,7 @@ export class ThermalPrinter {
         }
       }
 
+      // Moderate delay for reliable printing
       await new Promise(resolve => setTimeout(resolve, interChunkDelayMs));
     }
   }
@@ -289,24 +341,58 @@ export class ThermalPrinter {
       h % 256, Math.floor(h / 256)
     ]);
 
-    const ink: Uint8Array = new Uint8Array(w * h);
+    // Use Floyd-Steinberg dithering for ESC/POS too
+    const grayscale: number[] = new Array(w * h);
+    for (let i = 0; i < w * h; i++) {
+      const idx = i * 4;
+      const r = data[idx];
+      const g = data[idx + 1];
+      const b = data[idx + 2];
+      const a = data[idx + 3];
+      if (a > 60) {
+        grayscale[i] = 0.299 * r + 0.587 * g + 0.114 * b;
+      } else {
+        grayscale[i] = 255;
+      }
+    }
+
+    // Apply Floyd-Steinberg dithering
+    const dithered: boolean[] = new Array(w * h);
+    const error = new Float32Array(w * h);
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
-        const idx = (y * w + x) * 4;
-        const r = data[idx];
-        const g = data[idx + 1];
-        const b = data[idx + 2];
-        const a = data[idx + 3];
-        if (a > 60 && (r + g + b) / 3 < 210) {
-          ink[y * w + x] = 1;
+        const idx = y * w + x;
+        let value = grayscale[idx] + error[idx];
+        const quantized = value < 128 ? 0 : 255;
+        dithered[idx] = quantized === 0;
+        const err = value - quantized;
+        if (x + 1 < w) {
+          error[idx + 1] += err * 7 / 16;
+        }
+        if (y + 1 < h) {
+          const nextRow = (y + 1) * w;
+          if (x > 0) {
+            error[nextRow + x - 1] += err * 3 / 16;
+          }
+          error[nextRow + x] += err * 5 / 16;
+          if (x + 1 < w) {
+            error[nextRow + x + 1] += err * 1 / 16;
+          }
         }
       }
     }
 
-    const dilated = new Uint8Array(ink);
+    // Minimal 1-pixel dilation
+    const dilated: Uint8Array = new Uint8Array(w * h);
+    for (let i = 0; i < dithered.length; i++) {
+      dilated[i] = dithered[i] ? 1 : 0;
+    }
+
+    // Apply dilation
+    const dilatedCopy = new Uint8Array(dilated);
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
-        if (!ink[y * w + x]) continue;
+        if (!dilatedCopy[y * w + x]) continue;
         for (let dy = -1; dy <= 1; dy++) {
           for (let dx = -1; dx <= 1; dx++) {
             const ny = y + dy;
@@ -350,6 +436,7 @@ export class ThermalPrinter {
   }
 
   static escPosBytesToCanvas(data: Uint8Array): HTMLCanvasElement {
+    // Check if this is already a raster payload
     if (
       data.length > 16 &&
       data[0] === 0x1b && data[1] === 0x40 &&
@@ -390,6 +477,7 @@ export class ThermalPrinter {
       return canvas;
     }
 
+    // Parse text-mode ESC/POS stream
     const cmds = ThermalPrinter.getCommands();
     const matchers: { bytes: Uint8Array; apply: (s: DrawState) => void }[] = [
       { bytes: cmds.INIT, apply: () => {} },
@@ -448,12 +536,13 @@ export class ThermalPrinter {
     }
     flushText();
 
+    // OPTIMIZATION 7: Improved font rendering with fallback
     const width = CAT_PRINTER_WIDTH;
-    const normalFontSize = 22;
-    const largeFontSize = 36;
-    const normalLineHeight = 28;
-    const largeLineHeight = 44;
-    const feedLineHeight = 20;
+    const normalFontSize = 24;
+    const largeFontSize = 38;
+    const normalLineHeight = 30;
+    const largeLineHeight = 46;
+    const feedLineHeight = 22;
 
     let totalHeight = 20;
     for (const op of state.ops) {
@@ -469,6 +558,7 @@ export class ThermalPrinter {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = '#000';
     ctx.textBaseline = 'top';
+    ctx.imageSmoothingEnabled = false; // Sharper text
 
     let y = 20;
     for (const op of state.ops) {
@@ -478,7 +568,8 @@ export class ThermalPrinter {
       }
       const fontSize = op.large ? largeFontSize : normalFontSize;
       const lineHeight = op.large ? largeLineHeight : normalLineHeight;
-      ctx.font = `${op.bold ? 'bold ' : ''}${fontSize}px "Courier New", monospace`;
+      // OPTIMIZATION 12: Use sans-serif with bold/normal for better compatibility
+      ctx.font = `${op.bold ? "bold" : "normal"} ${fontSize}px sans-serif`;
       const textWidth = ctx.measureText(op.text).width;
       let x = 4;
       if (op.align === 'center') x = Math.max(4, (width - textWidth) / 2);

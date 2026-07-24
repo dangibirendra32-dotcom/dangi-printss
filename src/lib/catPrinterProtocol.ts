@@ -121,7 +121,19 @@ function cmdPrintRow(row: boolean[]): number[] {
   return packet(CMD.PRINT_ROW_RLE, runLengthEncodeRow(row));
 }
 
-export function buildCatPrinterImageCommands(rows: boolean[][], energy = 0xffff): Uint8Array {
+// ENERGY_LEVELS: Different energy settings for cat printers
+// OPTIMIZATION 1: Reduced energy to prevent over-burning
+export const ENERGY_LEVELS = {
+  LOW: 0x8000,      // 50% - for very sensitive printers
+  MEDIUM: 0xC000,   // 75% - for most printers
+  HIGH: 0xD800,     // 84.4% - Recommended for most cat printers
+  MAXIMUM: 0xFFFF,  // 100% - Maximum energy (may over-burn)
+};
+
+// Default energy level - CHANGED from MAXIMUM to HIGH for better results
+export const DEFAULT_ENERGY = ENERGY_LEVELS.HIGH;
+
+export function buildCatPrinterImageCommands(rows: boolean[][], energy: number = DEFAULT_ENERGY): Uint8Array {
   const packets: number[][] = [
     CMD_GET_DEV_STATE,
     CMD_SET_QUALITY_200_DPI,
@@ -143,7 +155,49 @@ export function buildCatPrinterImageCommands(rows: boolean[][], energy = 0xffff)
   return new Uint8Array(packets.flat());
 }
 
-export function canvasToCatPrinterRows(canvas: HTMLCanvasElement, darkMode: boolean = true): boolean[][] {
+/**
+ * Floyd-Steinberg dithering algorithm for better print quality
+ * This distributes quantization errors to neighboring pixels,
+ * creating much better looking output than simple thresholding.
+ */
+function floydSteinbergDither(grayscale: number[], width: number, height: number): boolean[] {
+  const result: boolean[] = new Array(width * height);
+  const error = new Float32Array(width * height);
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = y * width + x;
+      // Get original pixel value + accumulated error
+      let value = grayscale[idx] + error[idx];
+
+      // Quantize to 0 or 255
+      const quantized = value < 128 ? 0 : 255;
+      result[idx] = quantized === 0;
+
+      // Calculate quantization error
+      const err = value - quantized;
+
+      // Distribute error to neighboring pixels (Floyd-Steinberg)
+      if (x + 1 < width) {
+        error[idx + 1] += err * 7 / 16;
+      }
+      if (y + 1 < height) {
+        const nextRow = (y + 1) * width;
+        if (x > 0) {
+          error[nextRow + x - 1] += err * 3 / 16;
+        }
+        error[nextRow + x] += err * 5 / 16;
+        if (x + 1 < width) {
+          error[nextRow + x + 1] += err * 1 / 16;
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
+export function canvasToCatPrinterRows(canvas: HTMLCanvasElement): boolean[][] {
   const ctx = canvas.getContext('2d');
   if (!ctx) return [];
 
@@ -166,63 +220,54 @@ export function canvasToCatPrinterRows(canvas: HTMLCanvasElement, darkMode: bool
   const sctx = sourceCanvas.getContext('2d')!;
   const imgData = sctx.getImageData(0, 0, w, h).data;
 
-  // Lower threshold for darker output
-  const INK_THRESHOLD = 200;
+  // OPTIMIZATION 2: Use Floyd-Steinberg dithering instead of thresholding
 
-  const raw: boolean[][] = [];
+  // First, convert to grayscale
+  const grayscale: number[] = new Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    const idx = i * 4;
+    const r = imgData[idx];
+    const g = imgData[idx + 1];
+    const b = imgData[idx + 2];
+    const a = imgData[idx + 3];
+    if (a > 60) {
+      // Weighted grayscale conversion (better than simple average)
+      grayscale[i] = 0.299 * r + 0.587 * g + 0.114 * b;
+    } else {
+      grayscale[i] = 255; // Transparent -> white
+    }
+  }
+
+  // Apply Floyd-Steinberg dithering
+  const dithered = floydSteinbergDither(grayscale, w, h);
+
+  // OPTIMIZATION 3: Minimal dilation (only 1 pass, not 3)
+  const rows: boolean[][] = [];
   for (let y = 0; y < h; y++) {
-    const row: boolean[] = new Array(CAT_PRINTER_WIDTH).fill(false);
+    const row: boolean[] = new Array(w).fill(false);
     for (let x = 0; x < w; x++) {
-      const idx = (y * w + x) * 4;
-      const r = imgData[idx];
-      const g = imgData[idx + 1];
-      const b = imgData[idx + 2];
-      const a = imgData[idx + 3];
-      const brightness = (r + g + b) / 3;
-      row[x] = a > 60 && brightness < INK_THRESHOLD;
+      row[x] = dithered[y * w + x];
     }
-    raw.push(row);
+    rows.push(row);
   }
 
-  let rows = raw.map(row => [...row]);
-
-  // Multiple dilation passes for thicker text
-  for (let pass = 0; pass < 2; pass++) {
-    const current = pass === 0 ? raw : rows;
-    const next = current.map(row => [...row]);
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < CAT_PRINTER_WIDTH; x++) {
-        if (!current[y][x]) continue;
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dx = -1; dx <= 1; dx++) {
-            const ny = y + dy;
-            const nx = x + dx;
-            if (ny >= 0 && ny < h && nx >= 0 && nx < CAT_PRINTER_WIDTH) {
-              next[ny][nx] = true;
-            }
-          }
-        }
-      }
-    }
-    rows = next;
-  }
-
-  // Extra thickening for better readability
-  const final = rows.map(row => [...row]);
+  // Single small dilation pass (not 3 passes or 7x thickening)
+  const dilated = rows.map(row => [...row]);
   for (let y = 0; y < h; y++) {
-    for (let x = 0; x < CAT_PRINTER_WIDTH; x++) {
+    for (let x = 0; x < w; x++) {
       if (!rows[y][x]) continue;
-      for (let dy = -2; dy <= 2; dy++) {
-        for (let dx = -2; dx <= 2; dx++) {
+      // Only 1 pixel dilation in all 8 directions (not 3 pixels)
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
           const ny = y + dy;
           const nx = x + dx;
-          if (ny >= 0 && ny < h && nx >= 0 && nx < CAT_PRINTER_WIDTH) {
-            final[ny][nx] = true;
+          if (ny >= 0 && ny < h && nx >= 0 && nx < w) {
+            dilated[ny][nx] = true;
           }
         }
       }
     }
   }
 
-  return final;
+  return dilated;
 }
