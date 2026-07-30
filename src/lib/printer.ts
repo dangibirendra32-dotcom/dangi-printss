@@ -37,9 +37,22 @@ export class ThermalPrinter {
   private nativeWriteWithoutResponse = false;
 
   private printerType: PrinterType = 'escpos';
-
+  
   // Energy level for cat printers - adjustable
   private catPrinterEnergy: number = DEFAULT_ENERGY;
+
+  // Configuration options
+  public chunkSize: number = 128;
+  public delayMs: number = 20;
+  public forceWriteWithResponse: boolean = false;
+  public useCrLf: boolean = false;
+  public sendCutCommand: boolean = false;
+
+  // Connected state metadata
+  public connectedServiceUuid: string = '';
+  public connectedCharacteristicUuid: string = '';
+  public availableServices: string[] = [];
+  public availableCharacteristics: any[] = [];
 
   private static KNOWN_SERVICES = [
     '000018f0-0000-1000-8000-00805f9b34fb',
@@ -96,24 +109,29 @@ export class ThermalPrinter {
       }
     }
     this.printerType = 'escpos';
+    this.connectedServiceUuid = '';
+    this.connectedCharacteristicUuid = '';
   }
 
-  async connect() {
+  async connect(customServiceUuid?: string, customCharUuid?: string): Promise<boolean> {
     if (Capacitor.isNativePlatform()) {
-      return this.connectNative();
+      return this.connectNative(customServiceUuid, customCharUuid);
     }
-    return this.connectWeb();
+    return this.connectWeb(customServiceUuid, customCharUuid);
   }
 
-  private async connectNative(): Promise<boolean> {
+  private async connectNative(customServiceUuid?: string, customCharUuid?: string): Promise<boolean> {
     try {
       await BleClient.initialize();
 
-      const allServices = [...CAT_PRINTER_SERVICE_UUIDS, ...ThermalPrinter.KNOWN_SERVICES];
+      const optionalServices = [...CAT_PRINTER_SERVICE_UUIDS, ...ThermalPrinter.KNOWN_SERVICES];
+      if (customServiceUuid && !optionalServices.includes(customServiceUuid)) {
+        optionalServices.push(customServiceUuid);
+      }
 
       const device = await BleClient.requestDevice({
         services: [],
-        optionalServices: allServices,
+        optionalServices,
       });
 
       await BleClient.connect(device.deviceId, () => {
@@ -123,16 +141,23 @@ export class ThermalPrinter {
       });
 
       const services = await BleClient.getServices(device.deviceId);
+      this.availableServices = services.map(s => s.uuid);
 
       this.printerType = 'escpos';
       let matchedService: (typeof services)[number] | undefined;
 
-      for (const uuid of CAT_PRINTER_SERVICE_UUIDS) {
-        matchedService = services.find(s => s.uuid.toLowerCase() === uuid.toLowerCase());
-        if (matchedService) {
-          this.printerType = 'catprinter';
-          console.log(`Detected cat-printer style device on service: ${uuid}`);
-          break;
+      if (customServiceUuid) {
+        matchedService = services.find(s => s.uuid.toLowerCase() === customServiceUuid.toLowerCase());
+      }
+
+      if (!matchedService) {
+        for (const uuid of CAT_PRINTER_SERVICE_UUIDS) {
+          matchedService = services.find(s => s.uuid.toLowerCase() === uuid.toLowerCase());
+          if (matchedService) {
+            this.printerType = 'catprinter';
+            console.log(`Detected cat-printer style device on service: ${uuid}`);
+            break;
+          }
         }
       }
 
@@ -154,13 +179,27 @@ export class ThermalPrinter {
         throw new Error('No matching print services found on this device. Make sure the printer is turned on.');
       }
 
+      this.availableCharacteristics = matchedService.characteristics.map(c => ({
+        uuid: c.uuid,
+        properties: {
+          write: !!c?.properties?.write,
+          writeWithoutResponse: !!c?.properties?.writeWithoutResponse,
+        },
+      }));
+
       let characteristic;
-      if (this.printerType === 'catprinter') {
-        characteristic =
-          matchedService.characteristics.find(c => c.uuid.toLowerCase() === CAT_PRINTER_TX_CHARACTERISTIC_UUID.toLowerCase()) ||
-          matchedService.characteristics.find(c => c.properties.write || c.properties.writeWithoutResponse);
-      } else {
-        characteristic = matchedService.characteristics.find(c => c.properties.write || c.properties.writeWithoutResponse);
+      if (customCharUuid) {
+        characteristic = matchedService.characteristics.find(c => c?.uuid?.toLowerCase() === customCharUuid.toLowerCase());
+      }
+
+      if (!characteristic) {
+        if (this.printerType === 'catprinter') {
+          characteristic =
+            matchedService.characteristics.find(c => c?.uuid?.toLowerCase() === CAT_PRINTER_TX_CHARACTERISTIC_UUID.toLowerCase()) ||
+            matchedService.characteristics.find(c => c?.properties?.write || c?.properties?.writeWithoutResponse);
+        } else {
+          characteristic = matchedService.characteristics.find(c => c?.properties?.write || c?.properties?.writeWithoutResponse);
+        }
       }
 
       if (!characteristic) throw new Error('No writable characteristic found for printing');
@@ -168,7 +207,10 @@ export class ThermalPrinter {
       this.nativeDeviceId = device.deviceId;
       this.nativeServiceUuid = matchedService.uuid;
       this.nativeCharUuid = characteristic.uuid;
-      this.nativeWriteWithoutResponse = !!characteristic.properties.writeWithoutResponse;
+      this.nativeWriteWithoutResponse = !!(characteristic?.properties?.writeWithoutResponse);
+
+      this.connectedServiceUuid = matchedService.uuid;
+      this.connectedCharacteristicUuid = characteristic.uuid;
 
       return true;
     } catch (error) {
@@ -177,13 +219,16 @@ export class ThermalPrinter {
     }
   }
 
-  private async connectWeb(): Promise<boolean> {
+  private async connectWeb(customServiceUuid?: string, customCharUuid?: string): Promise<boolean> {
     try {
-      const allServices = [...CAT_PRINTER_SERVICE_UUIDS, ...ThermalPrinter.KNOWN_SERVICES];
+      const optionalServices = [...CAT_PRINTER_SERVICE_UUIDS, ...ThermalPrinter.KNOWN_SERVICES];
+      if (customServiceUuid && !optionalServices.includes(customServiceUuid)) {
+        optionalServices.push(customServiceUuid);
+      }
 
       this.device = await navigator.bluetooth.requestDevice({
         acceptAllDevices: true,
-        optionalServices: allServices,
+        optionalServices,
       });
 
       const server = await this.device.gatt?.connect();
@@ -192,16 +237,36 @@ export class ThermalPrinter {
       let service: BluetoothRemoteGATTService | null = null;
       this.printerType = 'escpos';
 
-      for (const serviceUuid of CAT_PRINTER_SERVICE_UUIDS) {
+      this.availableServices = [];
+      try {
+        const discovered = await server.getPrimaryServices();
+        if (discovered) {
+          this.availableServices = discovered.map(s => s.uuid);
+        }
+      } catch (e) {
+        // Ignore if listing services fails
+      }
+
+      if (customServiceUuid) {
         try {
-          service = await server.getPrimaryService(serviceUuid);
-          if (service) {
-            this.printerType = 'catprinter';
-            console.log(`Detected cat-printer style device on service: ${serviceUuid}`);
-            break;
-          }
+          service = await server.getPrimaryService(customServiceUuid);
         } catch (e) {
-          // Continue searching
+          // Fallback
+        }
+      }
+
+      if (!service) {
+        for (const serviceUuid of CAT_PRINTER_SERVICE_UUIDS) {
+          try {
+            service = await server.getPrimaryService(serviceUuid);
+            if (service) {
+              this.printerType = 'catprinter';
+              console.log(`Detected cat-printer style device on service: ${serviceUuid}`);
+              break;
+            }
+          } catch (e) {
+            // Continue searching
+          }
         }
       }
 
@@ -233,17 +298,35 @@ export class ThermalPrinter {
       if (!service) throw new Error('No print service found');
 
       const characteristics = await service.getCharacteristics();
+      this.availableCharacteristics = characteristics
+        ? characteristics.map(c => ({
+            uuid: c.uuid,
+            properties: {
+              write: !!c?.properties?.write,
+              writeWithoutResponse: !!c?.properties?.writeWithoutResponse,
+            },
+          }))
+        : [];
 
-      if (this.printerType === 'catprinter') {
-        this.characteristic =
-          characteristics?.find(c => c.uuid.toLowerCase() === CAT_PRINTER_TX_CHARACTERISTIC_UUID.toLowerCase()) ||
-          characteristics?.find(c => c.properties.write || c.properties.writeWithoutResponse) ||
-          null;
-      } else {
-        this.characteristic = characteristics?.find(c => c.properties.write || c.properties.writeWithoutResponse) || null;
+      if (customCharUuid) {
+        this.characteristic = characteristics?.find(c => c?.uuid?.toLowerCase() === customCharUuid.toLowerCase()) || null;
+      }
+
+      if (!this.characteristic) {
+        if (this.printerType === 'catprinter') {
+          this.characteristic =
+            characteristics?.find(c => c?.uuid?.toLowerCase() === CAT_PRINTER_TX_CHARACTERISTIC_UUID.toLowerCase()) ||
+            characteristics?.find(c => c?.properties?.write || c?.properties?.writeWithoutResponse) ||
+            null;
+        } else {
+          this.characteristic = characteristics?.find(c => c?.properties?.write || c?.properties?.writeWithoutResponse) || null;
+        }
       }
 
       if (!this.characteristic) throw new Error('No writable characteristic found for printing');
+
+      this.connectedServiceUuid = service.uuid;
+      this.connectedCharacteristicUuid = this.characteristic.uuid;
 
       return true;
     } catch (error) {
@@ -256,6 +339,66 @@ export class ThermalPrinter {
     return this.printerType;
   }
 
+  async setServiceByUuid(serviceUuid: string) {
+    if (Capacitor.isNativePlatform()) {
+      if (!this.nativeDeviceId) throw new Error('Printer not connected');
+      const services = await BleClient.getServices(this.nativeDeviceId);
+      const service = services.find(s => s.uuid.toLowerCase() === serviceUuid.toLowerCase());
+      if (!service) throw new Error(`Service ${serviceUuid} not found`);
+      this.nativeServiceUuid = service.uuid;
+      this.connectedServiceUuid = service.uuid;
+      this.availableCharacteristics = service.characteristics.map(c => ({
+        uuid: c.uuid,
+        properties: {
+          write: !!c?.properties?.write,
+          writeWithoutResponse: !!c?.properties?.writeWithoutResponse,
+        },
+      }));
+      const char = service.characteristics.find(c => c?.properties?.write || c?.properties?.writeWithoutResponse) || service.characteristics[0];
+      if (char) {
+        this.nativeCharUuid = char.uuid;
+        this.nativeWriteWithoutResponse = !!char.properties?.writeWithoutResponse;
+        this.connectedCharacteristicUuid = char.uuid;
+      }
+    } else {
+      if (!this.device || !this.device.gatt?.connected) throw new Error('Printer not connected');
+      const service = await this.device.gatt.getPrimaryService(serviceUuid);
+      const characteristics = await service.getCharacteristics();
+      this.connectedServiceUuid = service.uuid;
+      this.availableCharacteristics = characteristics ? characteristics.map(c => ({
+        uuid: c.uuid,
+        properties: {
+          write: !!c?.properties?.write,
+          writeWithoutResponse: !!c?.properties?.writeWithoutResponse,
+        },
+      })) : [];
+      const char = characteristics?.find(c => c?.properties?.write || c?.properties?.writeWithoutResponse) || characteristics?.[0];
+      if (char) {
+        this.characteristic = char;
+        this.connectedCharacteristicUuid = char.uuid;
+      }
+    }
+  }
+
+  async setCharacteristicByUuid(charUuid: string) {
+    if (Capacitor.isNativePlatform()) {
+      if (!this.nativeDeviceId || !this.nativeServiceUuid) throw new Error('Printer not connected');
+      const services = await BleClient.getServices(this.nativeDeviceId);
+      const service = services.find(s => s.uuid.toLowerCase() === this.nativeServiceUuid?.toLowerCase());
+      const char = service?.characteristics.find(c => c.uuid.toLowerCase() === charUuid.toLowerCase());
+      if (!char) throw new Error(`Characteristic ${charUuid} not found`);
+      this.nativeCharUuid = char.uuid;
+      this.nativeWriteWithoutResponse = !!char.properties?.writeWithoutResponse;
+      this.connectedCharacteristicUuid = char.uuid;
+    } else {
+      if (!this.device || !this.device.gatt?.connected || !this.connectedServiceUuid) throw new Error('Printer not connected');
+      const service = await this.device.gatt.getPrimaryService(this.connectedServiceUuid);
+      const char = await service.getCharacteristic(charUuid);
+      this.characteristic = char;
+      this.connectedCharacteristicUuid = char.uuid;
+    }
+  }
+
   async print(data: Uint8Array) {
     const isNative = Capacitor.isNativePlatform();
     if (isNative && !this.nativeDeviceId) throw new Error('Printer not connected');
@@ -263,7 +406,15 @@ export class ThermalPrinter {
 
     let outgoing = data;
 
-    if (this.printerType === 'catprinter') {
+    // Cat-printer protocol packets always start with 0x51, 0x78 (see
+    // catPrinterProtocol.ts's packet()). If the caller already built a
+    // cat-printer command stream directly (e.g. via
+    // ThermalPrinter.canvasToCatPrinter()), it must be sent as-is —
+    // re-running it through escPosBytesToCanvas would misinterpret this
+    // binary command data as an ESC/POS text stream and corrupt it.
+    const isAlreadyCatPrinterEncoded = data.length >= 2 && data[0] === 0x51 && data[1] === 0x78;
+
+    if (this.printerType === 'catprinter' && !isAlreadyCatPrinterEncoded) {
       const canvas = ThermalPrinter.escPosBytesToCanvas(data);
       const rows = canvasToCatPrinterRows(canvas);
       // Use the configured energy level
@@ -271,32 +422,33 @@ export class ThermalPrinter {
       console.log(`Printing with energy: ${this.catPrinterEnergy.toString(16)}`);
     }
 
-    // OPTIMIZATION 4: Safer chunk size for BLE compatibility
-    const chunkSize = 128; // Changed from 180 for better compatibility
-    // OPTIMIZATION 5: Moderate delay for reliable printing
-    const interChunkDelayMs = 20; // Changed from 10ms for reliability
+    const chunkSize = this.chunkSize || 128;
+    const interChunkDelayMs = this.delayMs || 20;
 
     for (let i = 0; i < outgoing.length; i += chunkSize) {
       const chunk = outgoing.slice(i, i + chunkSize);
 
       if (isNative) {
         const dv = numbersToDataView(Array.from(chunk));
-        if (this.nativeWriteWithoutResponse) {
+        if (this.nativeWriteWithoutResponse && !this.forceWriteWithResponse) {
           await BleClient.writeWithoutResponse(this.nativeDeviceId!, this.nativeServiceUuid!, this.nativeCharUuid!, dv);
         } else {
           await BleClient.write(this.nativeDeviceId!, this.nativeServiceUuid!, this.nativeCharUuid!, dv);
         }
       } else if (this.characteristic) {
-        if (typeof this.characteristic.writeValueWithoutResponse === 'function' && this.characteristic.properties.writeWithoutResponse) {
+        if (this.forceWriteWithResponse && typeof this.characteristic.writeValueWithResponse === 'function') {
+          await this.characteristic.writeValueWithResponse(chunk);
+        } else if (typeof this.characteristic.writeValueWithoutResponse === 'function' && (this.characteristic.properties?.writeWithoutResponse ?? false)) {
           await this.characteristic.writeValueWithoutResponse(chunk);
         } else if (typeof this.characteristic.writeValueWithResponse === 'function') {
           await this.characteristic.writeValueWithResponse(chunk);
-        } else {
-          await this.characteristic.writeValue(chunk);
+        } else if (typeof (this.characteristic as any).writeValue === 'function') {
+          await (this.characteristic as any).writeValue(chunk);
+        } else if (typeof this.characteristic.writeValueWithoutResponse === 'function') {
+          await this.characteristic.writeValueWithoutResponse(chunk);
         }
       }
 
-      // Moderate delay for reliable printing
       await new Promise(resolve => setTimeout(resolve, interChunkDelayMs));
     }
   }
@@ -316,12 +468,18 @@ export class ThermalPrinter {
     };
   }
 
-  static textToUint8(text: string) {
+  static textToUint8(text: string, useCrLf: boolean = false) {
     const encoder = new TextEncoder();
-    return encoder.encode(text + '\n');
+    const ending = useCrLf ? '\r\n' : '\n';
+    return encoder.encode(text + ending);
   }
 
-  static canvasToEscPos(canvas: HTMLCanvasElement): Uint8Array {
+  static canvasToCatPrinter(canvas: HTMLCanvasElement, energy: number = DEFAULT_ENERGY): Uint8Array {
+    const rows = canvasToCatPrinterRows(canvas);
+    return buildCatPrinterImageCommands(rows, energy);
+  }
+
+  static canvasToEscPos(canvas: HTMLCanvasElement, cut: boolean = false): Uint8Array {
     const ctx = canvas.getContext('2d');
     if (!ctx) return new Uint8Array();
 
@@ -387,7 +545,7 @@ export class ThermalPrinter {
     for (let i = 0; i < dithered.length; i++) {
       dilated[i] = dithered[i] ? 1 : 0;
     }
-
+    
     // Apply dilation
     const dilatedCopy = new Uint8Array(dilated);
     for (let y = 0; y < h; y++) {
@@ -421,11 +579,11 @@ export class ThermalPrinter {
       }
     }
 
-    const footer = new Uint8Array([
-      0x1b, 0x32,
-      0x1b, 0x64, 0x03,
-      0x1d, 0x56, 0x00
-    ]);
+    const footerArray = [0x1b, 0x32, 0x1b, 0x64, 0x03];
+    if (cut) {
+      footerArray.push(0x1d, 0x56, 0x00);
+    }
+    const footer = new Uint8Array(footerArray);
 
     const finalCmd = new Uint8Array(header.length + body.length + footer.length);
     finalCmd.set(header, 0);

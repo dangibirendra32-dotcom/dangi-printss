@@ -1,121 +1,59 @@
-# Building "Dangi Print" as an Android app via GitHub
+# Dangi Print — Android setup
 
-This project is now wrapped with **Capacitor** so it can run as a native Android
-app, and a **GitHub Actions** workflow (`.github/workflows/build-android.yml`)
-has been added that builds the APK for you automatically — you don't need
-Android Studio or a local Android SDK.
+This app already includes everything from our earlier printer work — the
+cat-printer protocol (Floyd-Steinberg dithering, adjustable energy levels),
+native Bluetooth support for the installed app, and a **Bluetooth Settings**
+panel for manually overriding the service/characteristic UUID, chunk size,
+and write delay if a specific printer needs different tuning. None of that
+needed to be re-added; it was already there.
+
+What was actually missing — and has now been added — is the Android/Capacitor
+wrapper itself:
+
+- `capacitor.config.ts`
+- `.github/workflows/build-android.yml` (builds the APK automatically via
+  GitHub Actions)
+- `@capacitor/android` and `@capacitor/cli` in `package.json`, plus
+  `cap:sync` / `cap:open` / `cap:copy` scripts
 
 ## 1. Push this project to GitHub
 
-```bash
-cd dangi-print          # the extracted folder
-git init
-git add .
-git commit -m "Add Capacitor + Android build workflow"
-git branch -M main
-git remote add origin https://github.com/<your-username>/<your-repo>.git
-git push -u origin main
-```
-
-(Create the empty repo on github.com first if you haven't already.)
+Same process as before:
+1. Create a new empty repo on github.com (no README).
+2. On the repo page, click **uploading an existing file**.
+3. Extract this zip on your computer, select everything **inside** the
+   extracted folder (not the folder itself), and drag it into the upload box.
+4. Make sure `.github/workflows/build-android.yml` shows up in the file list
+   before committing — dotfiles/folders are hidden by default in some file
+   explorers, so double check it's there. If it's missing, add it directly on
+   GitHub afterwards: **Add file → Create new file**, name it exactly
+   `.github/workflows/build-android.yml`, and paste in the workflow content.
+5. Commit.
 
 ## 2. Let GitHub build the APK
 
-As soon as you push to `main`, the **Build Android APK** workflow runs
-automatically. You can also trigger it manually:
+Go to the **Actions** tab — "Build Android APK" should run automatically.
+Wait for the green checkmark, open the run, and download the
+**dangi-print-debug-apk** artifact.
 
-- Go to your repo → **Actions** tab → **Build Android APK** → **Run workflow**.
+## 3. Test in a browser first
 
-When it finishes (a few minutes), open the workflow run → scroll to
-**Artifacts** → download **dangi-print-debug-apk**. That zip contains
-`app-debug.apk` — copy it to your phone (or scan a QR code link to it) and
-install it (enable "install unknown apps" for your file manager/browser).
+Before installing the APK, deploy the site (e.g. via Netlify connected to
+this GitHub repo) and test printing in Chrome on your phone first — this
+confirms the print pipeline itself is working before adding the native app
+layer on top.
 
-## 4. Print quality fixes (fade / missing logo / text layout)
+## 4. Bluetooth Settings panel
 
-If you tested printing and saw faded output, no logo, or text laid out
-differently than the on-screen preview, that's now fixed:
-
-- **Main "Print" button** now captures the actual on-screen receipt (logo
-  included) as an image and prints that directly, instead of rebuilding the
-  receipt from scratch as plain text. This is what was causing the logo to be
-  missing and the layout to not match what's on screen.
-- **Text still faded after the resolution fix, then the logo faded too**:
-  this printer has two ways to send a row of dots — a compressed (RLE) format
-  and a plain uncompressed one. Test prints showed the compressed format
-  (used for the logo, since it's mostly solid blocks) came out dark and
-  solid, while the plain uncompressed format (used as a fallback for
-  busy/text rows) came out faint. Switching everything to the uncompressed
-  format made even the logo faint too, confirming that format is the weak
-  one for this printer. Fixed by always using the compressed (RLE) row
-  format for every row, logo and text alike.
-
-Note: the **Quick Reprint** feature (reprinting a past receipt with adjusted
-amounts) still uses the older plain-text method, so it won't include the logo
-yet — only the main Print button has been upgraded so far.
-
-## 5. Bluetooth printing: works both in-browser and in the installed app
-
-The app detects what kind of printer you connect to and speaks its language
-automatically:
-
-- **Standard ESC/POS receipt printers** (generic serial/UART BLE bridges) —
-  works as before.
-- **"Cat printer" style mini printers** (GB01/GB02/GT01/PD01/MX-series and
-  rebrands like the **Sachii Mini Bluetooth Thermal Printer**) — these don't
-  understand ESC/POS at all; they use a different proprietary protocol. Support
-  for this has been added in `src/lib/catPrinterProtocol.ts`, and `printer.ts`
-  now auto-detects which type you paired and re-encodes the receipt as an
-  image for cat printers automatically.
-
-Bluetooth printing was initially only confirmed working in a phone/desktop
-browser (Chrome), because the installed Android app's WebView doesn't support
-the Web Bluetooth API at all. That's now fixed: `printer.ts` detects whether
-it's running as an installed app or in a browser, and automatically uses a
-native Bluetooth plugin (`@capacitor-community/bluetooth-le`) inside the
-installed app, while still using the browser's own Bluetooth in Chrome. No
-extra steps needed — just install the newly-built APK and use "Connect
-Printer" from inside the app itself.
-
-## 4. Customizing the app icon/name later
-
-Once `android/` exists (after the first CI run, or if you run
-`npx cap add android` yourself with Node/npm installed locally), you can:
-- Change the app name/id in `capacitor.config.ts`
-- Replace icons in `android/app/src/main/res/mipmap-*`
-- Use `npx @capacitor/assets generate` with a source icon to regenerate all
-  densities automatically.
-
-## 6. Verified against the real protocol
-
-I found and cross-checked the actual reverse-engineered protocol for this
-printer family (these are commonly called "cat printers" / sold with an
-"iPrint" style app). The command sequence, checksum method, and packet
-format in `catPrinterProtocol.ts` match the documented reference exactly.
-
-There's also a known, unresolved community issue with these printers: even a
-byte-perfect reimplementation of the protocol tends to print lighter than the
-official vendor app, and nobody has published why.
-
-To get darker output **without** using more paper, the fix is in image
-processing: strokes now get thickened in two stages — a 1px pass using all
-8 surrounding pixels, then an extra 2px-radius pass on top for even bolder
-lines. This doesn't change the receipt's length at all. Heads up: this is a
-fairly strong amount of thickening for a printer this narrow (384 dots), so
-if small text starts looking blobby or letters start merging together,
-that's the trade-off — let me know and I can dial it back.
-
-On top of that, the main Print button now captures the receipt at 4x
-resolution (up from 3x) before downscaling, and applies a hard black/white
-contrast pass to the final image before sending it to the printer — pixels
-darker than mid-gray become pure black, everything else becomes pure white.
-Combined with the stroke thickening above, this should meaningfully close
-the remaining darkness gap.
+If auto-detection doesn't pick the right service/characteristic for your
+printer, use the in-app **Bluetooth Settings** to manually specify one, or
+adjust chunk size / write delay if printing seems unreliable. Defaults
+(64 bytes, ~15ms) matched what worked in earlier testing — change these only
+if you're troubleshooting a specific printer.
 
 ## Notes
+
 - The workflow builds a **debug** APK (unsigned, fine for testing/sideloading).
-  For a Play Store release you'd need a signed **release** build — I can add
-  that step (keystore via GitHub Secrets) whenever you're ready to publish.
-- The old `app-debug.apk` files under `public/` and `APK_DOWNLOAD/` are leftover
-  from a previous export and aren't used by the app or this workflow — safe to
-  delete, or just ignore them.
+  For a Play Store release, a signed release build would be needed instead.
+- Leftover `app-debug.apk` files under `public/` and `APK_DOWNLOAD/` are not
+  used by the app or this workflow — safe to ignore or delete.

@@ -163,20 +163,20 @@ export function buildCatPrinterImageCommands(rows: boolean[][], energy: number =
 function floydSteinbergDither(grayscale: number[], width: number, height: number): boolean[] {
   const result: boolean[] = new Array(width * height);
   const error = new Float32Array(width * height);
-
+  
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const idx = y * width + x;
       // Get original pixel value + accumulated error
       let value = grayscale[idx] + error[idx];
-
+      
       // Quantize to 0 or 255
       const quantized = value < 128 ? 0 : 255;
       result[idx] = quantized === 0;
-
+      
       // Calculate quantization error
       const err = value - quantized;
-
+      
       // Distribute error to neighboring pixels (Floyd-Steinberg)
       if (x + 1 < width) {
         error[idx + 1] += err * 7 / 16;
@@ -193,7 +193,7 @@ function floydSteinbergDither(grayscale: number[], width: number, height: number
       }
     }
   }
-
+  
   return result;
 }
 
@@ -221,7 +221,7 @@ export function canvasToCatPrinterRows(canvas: HTMLCanvasElement): boolean[][] {
   const imgData = sctx.getImageData(0, 0, w, h).data;
 
   // OPTIMIZATION 2: Use Floyd-Steinberg dithering instead of thresholding
-
+  
   // First, convert to grayscale
   const grayscale: number[] = new Array(w * h);
   for (let i = 0; i < w * h; i++) {
@@ -240,7 +240,7 @@ export function canvasToCatPrinterRows(canvas: HTMLCanvasElement): boolean[][] {
 
   // Apply Floyd-Steinberg dithering
   const dithered = floydSteinbergDither(grayscale, w, h);
-
+  
   // OPTIMIZATION 3: Minimal dilation (only 1 pass, not 3)
   const rows: boolean[][] = [];
   for (let y = 0; y < h; y++) {
