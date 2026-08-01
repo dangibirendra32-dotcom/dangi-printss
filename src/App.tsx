@@ -346,124 +346,18 @@ export default function App() {
       return '';
     }
 
-    if (company === 'HP') {
-      return `<div style="display: flex; justify-content: center; align-items: center; width: 100%; margin: 4px 0 8px 0;">
-        <svg viewBox="0 0 180 210" style="width: 110px; height: auto; max-height: 120px; border: 1px solid #00529B; border-radius: 8px; background-color: #ffffff;">
-          <rect x="0" y="0" width="180" height="40" fill="#E41E26" />
-          <text x="90" y="25" font-size="12.5" font-weight="900" text-anchor="middle" fill="#FFFFFF" style="font-family: sans-serif; letter-spacing: 0.2px;">हिन्दुस्तान पेट्रोलियम</text>
-          <g transform="translate(90, 122)">
-            <circle cx="0" cy="0" r="50" fill="#FFFFFF" stroke="#00529B" stroke-width="4" />
-            <path d="M-43,6 C-27,-10 27,-10 43,6 C18,-3 -18,-3 -43,6 Z" fill="#00529B" />
-            <path d="M-38,18 C-20,0 20,0 38,18 C18,7 -18,7 -38,18 Z" fill="#00529B" />
-            <path d="M-5,41 L5,41 L0,49 Z" fill="#00529B" />
-            <text x="0" y="5" font-size="45" font-weight="950" text-anchor="middle" fill="#E41E26" style="font-family: sans-serif; letter-spacing: -1.5px;">HP</text>
-          </g>
-        </svg>
-      </div>`;
-    }
+    const logoSrcByCompany: Record<Exclude<PetrolCompany, 'CUSTOM'>, string> = {
+      JIO_BP: '/logos/jio-bp.svg',
+      HP: '/logos/hp.png',
+      BHARAT_PETROLEUM: '/logos/bharat-petroleum.png',
+      INDIAN_OIL: '/logos/indian-oil.png',
+      NAYARA: '/logos/nayara.png',
+      ESSAR: '/logos/essar.png',
+    };
+    const src = logoSrcByCompany[company as Exclude<PetrolCompany, 'CUSTOM'>] || logoSrcByCompany.JIO_BP;
 
-    if (company === 'BHARAT_PETROLEUM') {
-      return `<div style="display: flex; justify-content: center; align-items: center; width: 100%; margin: 4px 0 8px 0;">
-        <svg viewBox="0 0 180 210" style="width: 110px; height: auto; max-height: 120px; border: 1px solid #FFD200; border-radius: 8px; background-color: #ffffff;">
-          <rect x="0" y="0" width="180" height="120" fill="#FFFFFF" />
-          <g transform="translate(90, 60)">
-            <circle cx="0" cy="0" r="46" fill="#0071BC" />
-            <circle cx="0" cy="0" r="39" fill="none" stroke="#FFFFFF" stroke-width="3" />
-            <path d="M-20,-2 C-26,14 -16,26 -2,26 C16,26 25,12 25,-8 C25,-24 10,-26 -2,-22 C-10,-18 -12,-8 -5,-8 C2,-8 5,-15 10,-13 C15,-11 15,-2 11,8 C8,16 -7,20 -12,9 C-15,1 -10,-4 -18,-2" fill="#FFD200" />
-          </g>
-          <rect x="0" y="118" width="180" height="75" fill="#FFD200" />
-          <text x="90" y="148" font-size="24" font-weight="950" text-anchor="middle" fill="#0071BC" style="font-family: sans-serif;">Bharat</text>
-          <text x="90" y="178" font-size="18" font-weight="950" text-anchor="middle" fill="#0071BC" style="font-family: sans-serif;">Petroleum</text>
-          <rect x="0" y="193" width="180" height="17" fill="#0071BC" />
-        </svg>
-      </div>`;
-    }
-
-    // Default: JIO_BP
     return `<div style="display: flex; justify-content: center; align-items: center; width: 100%; margin: 4px 0 8px 0;">
-      <svg viewBox="0 0 350 200" style="width: 140px; height: auto; max-height: 90px;">
-        <circle cx="95" cy="100" r="72" fill="#009944" />
-        <g transform="translate(48, 70)">
-          <path d="M26 12 C26 7 30 5 35 5 C40 5 43 8 43 14 L43 55 C43 72 31 82 10 82 C-5 82 -11 73 -11 65 C-11 60 -7 56 -1 56 C6 56 8 61 11 63 C14 65 17 67 22 67 C30 67 33 61 33 49 L33 22 Z" fill="#FFFFFF" />
-          <circle cx="56" cy="8" r="8" fill="#FFFFFF" />
-          <rect x="49" y="22" width="14" height="42" rx="4" fill="#FFFFFF" />
-          <circle cx="98" cy="43" r="21" fill="none" stroke="#FFFFFF" stroke-width="14" />
-        </g>
-        <line x1="185" y1="40" x2="185" y2="160" stroke="#009944" stroke-width="4" stroke-linecap="round" />
-        <g transform="translate(255, 115)">
-          <path d="M 0,-42 C -8,-22 -4,0 0,0 C 4,0 8,-22 0,-42 Z" fill="#009944" transform="rotate(0)" />
-          <path d="M 0,-42 C -8,-22 -4,0 0,0 C 4,0 8,-22 0,-42 Z" fill="#009944" transform="rotate(20)" />
-          <path d="M 0,-42 C -8,-22 -4,0 0,0 C 4,0 8,-22 0,-42 Z" fill="#009944" transform="rotate(40)" />
-          <path d="M 0,-42 C -8,-22 -4,0 0,0 C 4,0 8,-22 0,-42 Z" fill="#009944" transform="rotate(60)" />
-          <path d="M 0,-42 C -8,-22 -4,0 0,0 C 4,0 8,-22 0,-42 Z" fill="#009944" transform="rotate(80)" />
-          <path d="M 0,-42 C -8,-22 -4,0 0,0 C 4,0 8,-22 0,-42 Z" fill="#009944" transform="rotate(100)" />
-          <path d="M 0,-42 C -8,-22 -4,0 0,0 C 4,0 8,-22 0,-42 Z" fill="#009944" transform="rotate(120)" />
-          <path d="M 0,-42 C -8,-22 -4,0 0,0 C 4,0 8,-22 0,-42 Z" fill="#009944" transform="rotate(140)" />
-          <path d="M 0,-42 C -8,-22 -4,0 0,0 C 4,0 8,-22 0,-42 Z" fill="#009944" transform="rotate(160)" />
-          <path d="M 0,-42 C -8,-22 -4,0 0,0 C 4,0 8,-22 0,-42 Z" fill="#009944" transform="rotate(180)" />
-          <path d="M 0,-42 C -8,-22 -4,0 0,0 C 4,0 8,-22 0,-42 Z" fill="#009944" transform="rotate(200)" />
-          <path d="M 0,-42 C -8,-22 -4,0 0,0 C 4,0 8,-22 0,-42 Z" fill="#009944" transform="rotate(220)" />
-          <path d="M 0,-42 C -8,-22 -4,0 0,0 C 4,0 8,-22 0,-42 Z" fill="#009944" transform="rotate(240)" />
-          <path d="M 0,-42 C -8,-22 -4,0 0,0 C 4,0 8,-22 0,-42 Z" fill="#009944" transform="rotate(260)" />
-          <path d="M 0,-42 C -8,-22 -4,0 0,0 C 4,0 8,-22 0,-42 Z" fill="#009944" transform="rotate(280)" />
-          <path d="M 0,-42 C -8,-22 -4,0 0,0 C 4,0 8,-22 0,-42 Z" fill="#009944" transform="rotate(300)" />
-          <path d="M 0,-42 C -8,-22 -4,0 0,0 C 4,0 8,-22 0,-42 Z" fill="#009944" transform="rotate(320)" />
-          <path d="M 0,-42 C -8,-22 -4,0 0,0 C 4,0 8,-22 0,-42 Z" fill="#009944" transform="rotate(340)" />
-
-          <path d="M 0,-33 C -6,-17 -3,0 0,0 C 3,0 6,-17 0,-33 Z" fill="#7AC143" transform="rotate(10)" />
-          <path d="M 0,-33 C -6,-17 -3,0 0,0 C 3,0 6,-17 0,-33 Z" fill="#7AC143" transform="rotate(30)" />
-          <path d="M 0,-33 C -6,-17 -3,0 0,0 C 3,0 6,-17 0,-33 Z" fill="#7AC143" transform="rotate(50)" />
-          <path d="M 0,-33 C -6,-17 -3,0 0,0 C 3,0 6,-17 0,-33 Z" fill="#7AC143" transform="rotate(70)" />
-          <path d="M 0,-33 C -6,-17 -3,0 0,0 C 3,0 6,-17 0,-33 Z" fill="#7AC143" transform="rotate(90)" />
-          <path d="M 0,-33 C -6,-17 -3,0 0,0 C 3,0 6,-17 0,-33 Z" fill="#7AC143" transform="rotate(110)" />
-          <path d="M 0,-33 C -6,-17 -3,0 0,0 C 3,0 6,-17 0,-33 Z" fill="#7AC143" transform="rotate(130)" />
-          <path d="M 0,-33 C -6,-17 -3,0 0,0 C 3,0 6,-17 0,-33 Z" fill="#7AC143" transform="rotate(150)" />
-          <path d="M 0,-33 C -6,-17 -3,0 0,0 C 3,0 6,-17 0,-33 Z" fill="#7AC143" transform="rotate(170)" />
-          <path d="M 0,-33 C -6,-17 -3,0 0,0 C 3,0 6,-17 0,-33 Z" fill="#7AC143" transform="rotate(190)" />
-          <path d="M 0,-33 C -6,-17 -3,0 0,0 C 3,0 6,-17 0,-33 Z" fill="#7AC143" transform="rotate(210)" />
-          <path d="M 0,-33 C -6,-17 -3,0 0,0 C 3,0 6,-17 0,-33 Z" fill="#7AC143" transform="rotate(230)" />
-          <path d="M 0,-33 C -6,-17 -3,0 0,0 C 3,0 6,-17 0,-33 Z" fill="#7AC143" transform="rotate(250)" />
-          <path d="M 0,-33 C -6,-17 -3,0 0,0 C 3,0 6,-17 0,-33 Z" fill="#7AC143" transform="rotate(270)" />
-          <path d="M 0,-33 C -6,-17 -3,0 0,0 C 3,0 6,-17 0,-33 Z" fill="#7AC143" transform="rotate(290)" />
-          <path d="M 0,-33 C -6,-17 -3,0 0,0 C 3,0 6,-17 0,-33 Z" fill="#7AC143" transform="rotate(310)" />
-          <path d="M 0,-33 C -6,-17 -3,0 0,0 C 3,0 6,-17 0,-33 Z" fill="#7AC143" transform="rotate(330)" />
-          <path d="M 0,-33 C -6,-17 -3,0 0,0 C 3,0 6,-17 0,-33 Z" fill="#7AC143" transform="rotate(350)" />
-
-          <path d="M 0,-24 C -4,-12 -2,0 0,0 C 2,0 4,-12 0,-24 Z" fill="#FFF200" transform="rotate(0)" />
-          <path d="M 0,-24 C -4,-12 -2,0 0,0 C 2,0 4,-12 0,-24 Z" fill="#FFF200" transform="rotate(20)" />
-          <path d="M 0,-24 C -4,-12 -2,0 0,0 C 2,0 4,-12 0,-24 Z" fill="#FFF200" transform="rotate(40)" />
-          <path d="M 0,-24 C -4,-12 -2,0 0,0 C 2,0 4,-12 0,-24 Z" fill="#FFF200" transform="rotate(60)" />
-          <path d="M 0,-24 C -4,-12 -2,0 0,0 C 2,0 4,-12 0,-24 Z" fill="#FFF200" transform="rotate(80)" />
-          <path d="M 0,-24 C -4,-12 -2,0 0,0 C 2,0 4,-12 0,-24 Z" fill="#FFF200" transform="rotate(100)" />
-          <path d="M 0,-24 C -4,-12 -2,0 0,0 C 2,0 4,-12 0,-24 Z" fill="#FFF200" transform="rotate(120)" />
-          <path d="M 0,-24 C -4,-12 -2,0 0,0 C 2,0 4,-12 0,-24 Z" fill="#FFF200" transform="rotate(140)" />
-          <path d="M 0,-24 C -4,-12 -2,0 0,0 C 2,0 4,-12 0,-24 Z" fill="#FFF200" transform="rotate(160)" />
-          <path d="M 0,-24 C -4,-12 -2,0 0,0 C 2,0 4,-12 0,-24 Z" fill="#FFF200" transform="rotate(180)" />
-          <path d="M 0,-24 C -4,-12 -2,0 0,0 C 2,0 4,-12 0,-24 Z" fill="#FFF200" transform="rotate(200)" />
-          <path d="M 0,-24 C -4,-12 -2,0 0,0 C 2,0 4,-12 0,-24 Z" fill="#FFF200" transform="rotate(220)" />
-          <path d="M 0,-24 C -4,-12 -2,0 0,0 C 2,0 4,-12 0,-24 Z" fill="#FFF200" transform="rotate(240)" />
-          <path d="M 0,-24 C -4,-12 -2,0 0,0 C 2,0 4,-12 0,-24 Z" fill="#FFF200" transform="rotate(260)" />
-          <path d="M 0,-24 C -4,-12 -2,0 0,0 C 2,0 4,-12 0,-24 Z" fill="#FFF200" transform="rotate(280)" />
-          <path d="M 0,-24 C -4,-12 -2,0 0,0 C 2,0 4,-12 0,-24 Z" fill="#FFF200" transform="rotate(300)" />
-          <path d="M 0,-24 C -4,-12 -2,0 0,0 C 2,0 4,-12 0,-24 Z" fill="#FFF200" transform="rotate(320)" />
-          <path d="M 0,-24 C -4,-12 -2,0 0,0 C 2,0 4,-12 0,-24 Z" fill="#FFF200" transform="rotate(340)" />
-
-          <circle cx="0" cy="0" r="10" fill="#FFFFFF" />
-          <path d="M 0,-14 L 2,0 L -2,0 Z" fill="#FFFFFF" transform="rotate(0)" />
-          <path d="M 0,-14 L 2,0 L -2,0 Z" fill="#FFFFFF" transform="rotate(30)" />
-          <path d="M 0,-14 L 2,0 L -2,0 Z" fill="#FFFFFF" transform="rotate(60)" />
-          <path d="M 0,-14 L 2,0 L -2,0 Z" fill="#FFFFFF" transform="rotate(90)" />
-          <path d="M 0,-14 L 2,0 L -2,0 Z" fill="#FFFFFF" transform="rotate(120)" />
-          <path d="M 0,-14 L 2,0 L -2,0 Z" fill="#FFFFFF" transform="rotate(150)" />
-          <path d="M 0,-14 L 2,0 L -2,0 Z" fill="#FFFFFF" transform="rotate(180)" />
-          <path d="M 0,-14 L 2,0 L -2,0 Z" fill="#FFFFFF" transform="rotate(210)" />
-          <path d="M 0,-14 L 2,0 L -2,0 Z" fill="#FFFFFF" transform="rotate(240)" />
-          <path d="M 0,-14 L 2,0 L -2,0 Z" fill="#FFFFFF" transform="rotate(270)" />
-          <path d="M 0,-14 L 2,0 L -2,0 Z" fill="#FFFFFF" transform="rotate(300)" />
-          <path d="M 0,-14 L 2,0 L -2,0 Z" fill="#FFFFFF" transform="rotate(330)" />
-        </g>
-        <text x="302" y="70" font-size="48" font-weight="900" fill="#009944" style="font-family: sans-serif; letter-spacing: -3px;">bp</text>
-      </svg>
+      <img src="${src}" style="max-width: 150px; max-height: 110px; object-fit: contain;" />
     </div>`;
   };
 
@@ -1568,13 +1462,33 @@ export default function App() {
                   <div className="space-y-4">
                     <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 block">Petrol Company</label>
                     <div className="grid grid-cols-4 gap-2">
-                      {(['JIO_BP', 'HP', 'BHARAT_PETROLEUM', 'CUSTOM'] as PetrolCompany[]).map(co => (
+                      {(['JIO_BP', 'HP', 'BHARAT_PETROLEUM', 'INDIAN_OIL', 'NAYARA', 'ESSAR', 'CUSTOM'] as PetrolCompany[]).map(co => {
+                        const companyDisplayName: Record<PetrolCompany, string> = {
+                          JIO_BP: 'Jio-bp',
+                          HP: 'HP',
+                          BHARAT_PETROLEUM: 'Bharat Petroleum',
+                          INDIAN_OIL: 'Indian Oil',
+                          NAYARA: 'Nayara Energy',
+                          ESSAR: 'Essar',
+                          CUSTOM: 'My Petrol',
+                        };
+                        const companyShortLabel: Record<PetrolCompany, string> = {
+                          JIO_BP: 'Jio-bp',
+                          HP: 'HP',
+                          BHARAT_PETROLEUM: 'BP',
+                          INDIAN_OIL: 'IOC',
+                          NAYARA: 'Nayara',
+                          ESSAR: 'Essar',
+                          CUSTOM: 'Custom',
+                        };
+                        const knownDisplayNames = Object.values(companyDisplayName);
+                        return (
                         <button
                           key={co}
                           type="button"
                           onClick={() => setData({
                             ...data, 
-                            companyName: co === 'JIO_BP' ? 'Jio-bp' : co === 'HP' ? 'HP' : co === 'BHARAT_PETROLEUM' ? 'Bharat Petroleum' : (data.companyName === 'Jio-bp' || data.companyName === 'HP' || data.companyName === 'Bharat Petroleum' ? 'My Petrol' : data.companyName),
+                            companyName: co === 'CUSTOM' ? (knownDisplayNames.includes(data.companyName) ? 'My Petrol' : data.companyName) : companyDisplayName[co],
                             petrolDetails: { ...data.petrolDetails!, company: co }
                           })}
                           className={`p-2 border-2 rounded-xl flex flex-col items-center justify-center transition-all ${
@@ -1593,14 +1507,15 @@ export default function App() {
                                 </svg>
                               )
                             ) : (
-                              co === 'JIO_BP' ? PETROL_LOGOS.JIO_BP : co === 'HP' ? PETROL_LOGOS.HP : PETROL_LOGOS.BHARAT_PETROLEUM
+                              PETROL_LOGOS[co]
                             )}
                           </div>
                           <span className="text-[9px] font-bold mt-1 tracking-tight truncate w-full text-center">
-                            {co === 'JIO_BP' ? 'Jio-bp' : co === 'HP' ? 'HP' : co === 'BHARAT_PETROLEUM' ? 'BP' : 'Custom'}
+                            {companyShortLabel[co]}
                           </span>
                         </button>
-                      ))}
+                        );
+                      })}
                     </div>
 
                     {data.petrolDetails?.company === 'CUSTOM' && (

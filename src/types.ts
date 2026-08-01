@@ -1,6 +1,6 @@
 export type BillType = 'MART' | 'RESTAURANT' | 'PETROL';
 
-export type PetrolCompany = 'JIO_BP' | 'HP' | 'BHARAT_PETROLEUM' | 'CUSTOM';
+export type PetrolCompany = 'JIO_BP' | 'HP' | 'BHARAT_PETROLEUM' | 'INDIAN_OIL' | 'NAYARA' | 'ESSAR' | 'CUSTOM';
 
 export interface ReceiptItem {
   id: string;
