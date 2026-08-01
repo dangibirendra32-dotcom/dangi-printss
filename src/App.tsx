@@ -52,6 +52,9 @@ import { QRCodeSVG } from 'qrcode.react';
 import confetti from 'canvas-confetti';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
+import { Capacitor } from '@capacitor/core';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
 
 import { BillType, ReceiptData, ReceiptItem, PetrolCompany, HistoryItem } from './types';
 import { ThermalPrinter } from './lib/printer';
@@ -348,7 +351,7 @@ export default function App() {
 
     const logoSrcByCompany: Record<Exclude<PetrolCompany, 'CUSTOM'>, string> = {
       JIO_BP: '/logos/jio-bp.svg',
-      HP: '/logos/hp.png',
+      HP: '/logos/hp.svg',
       BHARAT_PETROLEUM: '/logos/bharat-petroleum.png',
       INDIAN_OIL: '/logos/indian-oil.png',
       NAYARA: '/logos/nayara.png',
@@ -547,7 +550,27 @@ export default function App() {
         pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
       }
 
-      pdf.save(fileName);
+      if (Capacitor.isNativePlatform()) {
+        // pdf.save() relies on the browser's native download behavior
+        // (a synthetic <a download> click), which does not work reliably
+        // inside an installed Android app's WebView. Instead, write the
+        // file to the app's cache directory and open the native share
+        // sheet, which lets the user save it, send it via WhatsApp, etc.
+        const dataUri = pdf.output('datauristring');
+        const base64Data = dataUri.split('base64,')[1] || '';
+        const writeResult = await Filesystem.writeFile({
+          path: fileName,
+          data: base64Data,
+          directory: Directory.Cache,
+        });
+        await Share.share({
+          title: fileName,
+          url: writeResult.uri,
+          dialogTitle: 'Save or share PDF',
+        });
+      } else {
+        pdf.save(fileName);
+      }
 
       try {
         confetti({
