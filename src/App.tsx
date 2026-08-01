@@ -51,7 +51,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { QRCodeSVG } from 'qrcode.react';
 import confetti from 'canvas-confetti';
 import html2canvas from 'html2canvas';
-import jsPDF from 'jspdf';
+import { jsPDF } from 'jspdf';
 
 import { BillType, ReceiptData, ReceiptItem, PetrolCompany, HistoryItem } from './types';
 import { ThermalPrinter } from './lib/printer';
