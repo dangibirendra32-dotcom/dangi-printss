@@ -78,9 +78,9 @@ export default function App() {
     items: INITIAL_ITEMS,
     subtotal: 100,
     taxLabel: 'GST',
-    taxRate: 18,
-    taxAmount: 18,
-    total: 118,
+    taxRate: 0,
+    taxAmount: 0,
+    total: 100,
     paymentMode: 'CASH',
     fontSize: 'medium',
     fontStyle: 'normal',
@@ -454,7 +454,6 @@ export default function App() {
 
         <div style="width: 100%; padding: 0 4px; text-align: right; font-size: 10px;">
           <div style="display: flex; justify-content: space-between; margin-bottom: 3px;"><span>SUBTOTAL</span><span>₹${(rData.subtotal || 0).toFixed(2)}</span></div>
-          <div style="display: flex; justify-content: space-between; margin-bottom: 3px;"><span>${rData.taxLabel || 'TAX'}</span><span>₹${(rData.taxAmount || 0).toFixed(2)}</span></div>
           <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 900; margin-top: 6px;">
             <span style="text-transform: uppercase;">Grand Total</span>
             <span>₹${(rData.total || 0).toFixed(2)}</span>
@@ -622,8 +621,8 @@ export default function App() {
       });
       
       adjusted.subtotal = parseFloat(subtotalAcc.toFixed(2));
-      adjusted.taxAmount = parseFloat((subtotalAcc * (adjusted.taxRate / 100)).toFixed(2));
-      adjusted.total = parseFloat((adjusted.subtotal + adjusted.taxAmount).toFixed(2));
+      adjusted.taxAmount = 0;
+      adjusted.total = adjusted.subtotal;
     }
     return adjusted;
   };
@@ -674,8 +673,8 @@ export default function App() {
         });
         
         adjusted.subtotal = parseFloat(subtotalAcc.toFixed(2));
-        adjusted.taxAmount = parseFloat((subtotalAcc * (adjusted.taxRate / 100)).toFixed(2));
-        adjusted.total = parseFloat((adjusted.subtotal + adjusted.taxAmount).toFixed(2));
+        adjusted.taxAmount = 0;
+        adjusted.total = adjusted.subtotal;
       }
 
       if (printerProtocol === 'cat-printer') {
@@ -774,7 +773,6 @@ export default function App() {
         chunks.push(ThermalPrinter.textToUint8(`--------------------------------`));
         chunks.push(cmds.ALIGN_RIGHT);
         chunks.push(ThermalPrinter.textToUint8(`Subtotal: ${adjusted.subtotal.toFixed(2)}`));
-        chunks.push(ThermalPrinter.textToUint8(`${adjusted.taxLabel}: ${adjusted.taxAmount.toFixed(2)}`));
         chunks.push(cmds.BOLD_ON);
         chunks.push(ThermalPrinter.textToUint8(`TOTAL: ${adjusted.total.toFixed(2)}`));
         chunks.push(cmds.BOLD_OFF);
@@ -1091,7 +1089,6 @@ export default function App() {
         chunks.push(ThermalPrinter.textToUint8(`--------------------------------`));
         chunks.push(cmds.ALIGN_RIGHT);
         chunks.push(ThermalPrinter.textToUint8(`Subtotal: ${data.subtotal.toFixed(2)}`));
-        chunks.push(ThermalPrinter.textToUint8(`${data.taxLabel}: ${data.taxAmount.toFixed(2)}`));
         chunks.push(cmds.BOLD_ON);
         chunks.push(ThermalPrinter.textToUint8(`TOTAL: ${data.total.toFixed(2)}`));
         chunks.push(cmds.BOLD_OFF);
@@ -1796,7 +1793,67 @@ export default function App() {
                   </button>
                 </div>
                 
-                <div className="overflow-x-auto w-full min-w-0">
+                {/* Mobile: card-based item list — avoids the horizontal scroll a wide
+                    table would need on narrow phones, and keeps the delete button
+                    always immediately visible instead of requiring a scroll to reach it. */}
+                <div className="sm:hidden space-y-3">
+                  <AnimatePresence mode="popLayout">
+                    {data.items.map((item, index) => (
+                      <motion.div
+                        key={item.id}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.95 }}
+                        className="bg-slate-50/50 rounded-2xl p-3"
+                      >
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-xs font-bold text-slate-400 w-5 text-center shrink-0">{index + 1}</span>
+                          <input
+                            type="text"
+                            value={item.name}
+                            onChange={(e) => updateItem(item.id, 'name', e.target.value)}
+                            className="flex-1 min-w-0 bg-white rounded-xl px-3 py-2 border-none focus:outline-none font-bold text-slate-700 placeholder:text-slate-300"
+                            placeholder="e.g. Bread"
+                          />
+                          <button
+                            onClick={() => removeItem(item.id)}
+                            className="p-2 bg-red-50 text-red-500 active:bg-red-100 rounded-xl active:scale-95 shrink-0"
+                            title="Remove Item"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 pl-7">
+                          <div>
+                            <label className="text-[9px] font-black uppercase tracking-wider text-slate-400">Qty</label>
+                            <input
+                              type="number"
+                              value={item.quantity}
+                              onChange={(e) => updateItem(item.id, 'quantity', parseFloat(e.target.value) || 0)}
+                              className="w-full bg-white rounded-xl px-2 py-1.5 border-none focus:outline-none font-bold text-slate-700"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[9px] font-black uppercase tracking-wider text-slate-400">Rate</label>
+                            <input
+                              type="number"
+                              value={item.rate}
+                              onChange={(e) => updateItem(item.id, 'rate', parseFloat(e.target.value) || 0)}
+                              className="w-full bg-white rounded-xl px-2 py-1.5 border-none focus:outline-none font-bold text-slate-700"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[9px] font-black uppercase tracking-wider text-slate-400">Total</label>
+                            <div className="px-2 py-1.5 font-black text-slate-900">₹{item.total.toFixed(2)}</div>
+                          </div>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
+                </div>
+
+                {/* Desktop/tablet: compact table layout */}
+                <div className="hidden sm:block overflow-x-auto w-full min-w-0">
                   <table className="w-full min-w-[480px] text-left text-sm border-separate border-spacing-y-2">
                     <thead>
                       <tr className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em]">
@@ -1873,15 +1930,6 @@ export default function App() {
                 <div className="flex items-center gap-8 text-sm text-slate-500 font-bold">
                   <span>Subtotal</span>
                   <span className="w-24 text-right">₹{data.subtotal.toFixed(2)}</span>
-                </div>
-                <div className="flex items-center gap-8 text-sm text-slate-500 font-bold">
-                  <input 
-                    type="text" 
-                    value={data.taxLabel}
-                    onChange={(e) => setData({...data, taxLabel: e.target.value})}
-                    className="bg-transparent border-none text-right focus:outline-none p-0 w-32 font-bold cursor-edit"
-                  />
-                  <span className="w-24 text-right">₹{data.taxAmount.toFixed(2)}</span>
                 </div>
                 <div className="flex items-center gap-8 text-xl font-black text-emerald-600 bg-emerald-50 px-6 py-3 rounded-2xl">
                   <span>GRAND TOTAL</span>
@@ -2224,10 +2272,6 @@ export default function App() {
                       <div className="flex justify-between">
                         <span>SUBTOTAL</span>
                         <span>₹{data.subtotal.toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>{data.taxLabel}</span>
-                        <span>₹{data.taxAmount.toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between text-sm font-black mt-1">
                         <span className="uppercase">Grand Total</span>
