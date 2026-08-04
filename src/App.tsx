@@ -1282,9 +1282,9 @@ export default function App() {
         </div>
       </header>
 
-      <main className="container mx-auto p-3 sm:p-6 lg:p-8 grid lg:grid-cols-12 gap-6 lg:gap-8">
+      <main className="container mx-auto p-3 sm:p-6 lg:p-8 grid lg:grid-cols-12 gap-6 lg:gap-8 min-w-0">
         {/* Left Side: Controls & Editor */}
-        <div className="lg:col-span-7 xl:col-span-8 flex flex-col gap-5 sm:gap-6">
+        <div className="lg:col-span-7 xl:col-span-8 flex flex-col gap-5 sm:gap-6 min-w-0">
           
           {/* Bill Type Selector */}
           <div className="bg-white p-1.5 rounded-2xl shadow-sm border border-slate-200/80 grid grid-cols-3 gap-1.5">
@@ -1796,8 +1796,8 @@ export default function App() {
                   </button>
                 </div>
                 
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-sm border-separate border-spacing-y-2">
+                <div className="overflow-x-auto w-full min-w-0">
+                  <table className="w-full min-w-[480px] text-left text-sm border-separate border-spacing-y-2">
                     <thead>
                       <tr className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em]">
                         <th className="pb-2 w-8">#</th>
@@ -2088,7 +2088,7 @@ export default function App() {
         </div>
 
         {/* Right Side: Virtual Preview */}
-        <div className="lg:col-span-5 xl:col-span-4 sticky top-24 self-start">
+        <div className="lg:col-span-5 xl:col-span-4 sticky top-24 self-start min-w-0">
           <div className="relative group">
             {/* Paper Texture Overlay */}
             <div className="absolute inset-0 bg-gradient-to-b from-transparent via-slate-900/5 to-slate-900/10 pointer-events-none rounded-[40px] z-10 opacity-50"></div>
