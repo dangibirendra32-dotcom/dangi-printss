@@ -77,7 +77,7 @@ export default function App() {
     billNumber: 'BILL-' + Math.floor(1000 + Math.random() * 9000),
     items: INITIAL_ITEMS,
     subtotal: 100,
-    taxLabel: 'GST (18%)',
+    taxLabel: 'GST',
     taxRate: 18,
     taxAmount: 18,
     total: 118,
@@ -410,9 +410,10 @@ export default function App() {
       `;
     }
 
-    const itemsHtml = (rData.items || []).map(item => `
+    const itemsHtml = (rData.items || []).map((item, index) => `
       <div style="display: flex; justify-content: space-between; align-items: flex-start; margin: 4px 0; font-size: 10px;">
-        <span style="width: 50%; word-break: break-word; line-height: 1.1;">${item.name || 'Unnamed Item'}</span>
+        <span style="width: 8%;">${index + 1}</span>
+        <span style="width: 42%; word-break: break-word; line-height: 1.1;">${item.name || 'Unnamed Item'}</span>
         <span style="width: 16.66%; text-align: right;">${item.quantity}</span>
         <span style="width: 33.33%; text-align: right;">₹${(item.total || 0).toFixed(2)}</span>
       </div>
@@ -441,7 +442,8 @@ export default function App() {
 
         <div style="width: 100%; padding: 0 4px;">
           <div style="display: flex; justify-content: space-between; font-weight: 900; font-size: 10px; margin-bottom: 4px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px;">
-            <span style="width: 50%;">ITEM</span>
+            <span style="width: 8%;">#</span>
+            <span style="width: 42%;">ITEM</span>
             <span style="width: 16.66%; text-align: right;">QTY</span>
             <span style="width: 33.33%; text-align: right;">TOTAL</span>
           </div>
@@ -758,15 +760,15 @@ export default function App() {
         chunks.push(ThermalPrinter.textToUint8(`Bill No: ${adjusted.billNumber}`));
         chunks.push(ThermalPrinter.textToUint8(`--------------------------------`));
         
-        chunks.push(ThermalPrinter.textToUint8(`ITEM            QTY    RATE   TOTAL`));
+        chunks.push(ThermalPrinter.textToUint8(`#  ITEM          QTY   TOTAL`));
         chunks.push(ThermalPrinter.textToUint8(`--------------------------------`));
         
-        adjusted.items.forEach(item => {
-          const namePart = item.name.substring(0, 15).padEnd(15);
+        adjusted.items.forEach((item, index) => {
+          const noPart = (index + 1).toString().padStart(2);
+          const namePart = item.name.substring(0, 13).padEnd(13);
           const qtyPart = item.quantity.toString().padStart(3);
-          const ratePart = item.rate.toString().padStart(6);
           const totalPart = item.total.toString().padStart(6);
-          chunks.push(ThermalPrinter.textToUint8(`${namePart} ${qtyPart} ${ratePart} ${totalPart}`));
+          chunks.push(ThermalPrinter.textToUint8(`${noPart} ${namePart} ${qtyPart} ${totalPart}`));
         });
         
         chunks.push(ThermalPrinter.textToUint8(`--------------------------------`));
@@ -823,6 +825,20 @@ export default function App() {
     }));
   };
 
+  // Recalculates subtotal/taxAmount/total from the current items list and
+  // tax rate. Must be called any time items are added, edited, or removed —
+  // otherwise the displayed Grand Total silently goes stale.
+  const recalcTotals = (items: ReceiptItem[], taxRate: number) => {
+    const subtotal = items.reduce((sum, item) => sum + item.total, 0);
+    const taxAmount = subtotal * (taxRate / 100);
+    const total = subtotal + taxAmount;
+    return {
+      subtotal: parseFloat(subtotal.toFixed(2)),
+      taxAmount: parseFloat(taxAmount.toFixed(2)),
+      total: parseFloat(total.toFixed(2)),
+    };
+  };
+
   const addItem = () => {
     const newItem: ReceiptItem = {
       id: Math.random().toString(36).substr(2, 9),
@@ -831,13 +847,15 @@ export default function App() {
       rate: 0,
       total: 0
     };
-    setData(prev => ({ ...prev, items: [...prev.items, newItem] }));
+    setData(prev => {
+      const items = [...prev.items, newItem];
+      return { ...prev, items, ...recalcTotals(items, prev.taxRate) };
+    });
   };
 
   const updateItem = (id: string, field: keyof ReceiptItem, value: any) => {
-    setData(prev => ({
-      ...prev,
-      items: prev.items.map(item => {
+    setData(prev => {
+      const items = prev.items.map(item => {
         if (item.id === id) {
           const updatedItem = { ...item, [field]: value };
           if (field === 'quantity' || field === 'rate') {
@@ -846,15 +864,16 @@ export default function App() {
           return updatedItem;
         }
         return item;
-      })
-    }));
+      });
+      return { ...prev, items, ...recalcTotals(items, prev.taxRate) };
+    });
   };
 
   const removeItem = (id: string) => {
-    setData(prev => ({
-      ...prev,
-      items: prev.items.filter(item => item.id !== id)
-    }));
+    setData(prev => {
+      const items = prev.items.filter(item => item.id !== id);
+      return { ...prev, items, ...recalcTotals(items, prev.taxRate) };
+    });
   };
 
   const connectPrinter = async () => {
@@ -1058,15 +1077,15 @@ export default function App() {
         chunks.push(ThermalPrinter.textToUint8(`--------------------------------`));
         
         // Header for items
-        chunks.push(ThermalPrinter.textToUint8(`ITEM            QTY    RATE   TOTAL`));
+        chunks.push(ThermalPrinter.textToUint8(`#  ITEM          QTY   TOTAL`));
         chunks.push(ThermalPrinter.textToUint8(`--------------------------------`));
         
-        data.items.forEach(item => {
-          const namePart = item.name.substring(0, 15).padEnd(15);
+        data.items.forEach((item, index) => {
+          const noPart = (index + 1).toString().padStart(2);
+          const namePart = item.name.substring(0, 13).padEnd(13);
           const qtyPart = item.quantity.toString().padStart(3);
-          const ratePart = item.rate.toString().padStart(6);
           const totalPart = item.total.toString().padStart(6);
-          chunks.push(ThermalPrinter.textToUint8(`${namePart} ${qtyPart} ${ratePart} ${totalPart}`));
+          chunks.push(ThermalPrinter.textToUint8(`${noPart} ${namePart} ${qtyPart} ${totalPart}`));
         });
         
         chunks.push(ThermalPrinter.textToUint8(`--------------------------------`));
@@ -1200,7 +1219,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 pb-28 lg:pb-0">
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 pb-28 lg:pb-0 overflow-x-hidden">
       {/* Header */}
       <header className="bg-slate-900/95 backdrop-blur-xl text-white px-3 sm:px-6 py-3.5 shadow-xl sticky top-0 z-40 border-b border-slate-800/80">
         <div className="container mx-auto flex justify-between items-center gap-2">
@@ -1242,14 +1261,14 @@ export default function App() {
 
             <button 
               onClick={connectPrinter}
-              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-2xl text-xs font-black transition-all border cursor-pointer active:scale-95 shadow-sm ${
+              className={`flex items-center gap-1.5 px-2.5 sm:px-3.5 py-2 rounded-2xl text-xs font-black transition-all border cursor-pointer active:scale-95 shadow-sm ${
                 isPrinterConnected 
                   ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/30' 
                   : 'bg-emerald-600 text-white hover:bg-emerald-500 border-emerald-500'
               }`}
             >
               <Bluetooth className={`w-3.5 h-3.5 ${isPrinterConnected ? 'text-emerald-400' : 'text-white animate-pulse'}`} />
-              <span className="text-[11px] uppercase tracking-wider">{isPrinterConnected ? 'Connected' : 'Connect'}</span>
+              <span className="hidden sm:inline text-[11px] uppercase tracking-wider">{isPrinterConnected ? 'Connected' : 'Connect'}</span>
             </button>
 
             <button
@@ -1781,6 +1800,7 @@ export default function App() {
                   <table className="w-full text-left text-sm border-separate border-spacing-y-2">
                     <thead>
                       <tr className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em]">
+                        <th className="pb-2 w-8">#</th>
                         <th className="pb-2">Description</th>
                         <th className="pb-2">Qty</th>
                         <th className="pb-2">Rate</th>
@@ -1790,7 +1810,7 @@ export default function App() {
                     </thead>
                     <tbody>
                       <AnimatePresence mode="popLayout">
-                        {data.items.map((item) => (
+                        {data.items.map((item, index) => (
                           <motion.tr 
                             key={item.id}
                             initial={{ opacity: 0, y: 10 }}
@@ -1798,7 +1818,10 @@ export default function App() {
                             exit={{ opacity: 0, scale: 0.95 }}
                             className="bg-slate-50/50 rounded-2xl group"
                           >
-                            <td className="p-2 first:rounded-l-2xl">
+                            <td className="p-2 first:rounded-l-2xl text-center text-xs font-bold text-slate-400">
+                              {index + 1}
+                            </td>
+                            <td className="p-2">
                               <input 
                                 type="text" 
                                 value={item.name}
@@ -2177,14 +2200,16 @@ export default function App() {
                     {/* Items Table */}
                     <div className="w-full px-1">
                       <div className="flex justify-between font-black text-[10px] mb-1">
-                        <span className="w-1/2">ITEM</span>
+                        <span className="w-[8%]">#</span>
+                        <span className="w-[42%]">ITEM</span>
                         <span className="w-1/6 text-right">QTY</span>
                         <span className="w-1/3 text-right">TOTAL</span>
                       </div>
                       <div className="space-y-1 mb-2">
-                        {data.items.map(item => (
+                        {data.items.map((item, index) => (
                           <div key={item.id} className="flex justify-between items-start">
-                            <span className="w-1/2 break-words leading-[1]">{item.name || 'Unnamed Item'}</span>
+                            <span className="w-[8%]">{index + 1}</span>
+                            <span className="w-[42%] break-words leading-[1]">{item.name || 'Unnamed Item'}</span>
                             <span className="w-1/6 text-right">{item.quantity}</span>
                             <span className="w-1/3 text-right">₹{item.total.toFixed(2)}</span>
                           </div>
@@ -2338,9 +2363,9 @@ export default function App() {
                         <p className="font-bold text-sm mb-1">{data.companyName || 'BUSINESS NAME'}</p>
                         <p className="text-[10px] text-slate-600 mb-3">{data.address}</p>
                         <div className="border-y border-dashed border-slate-400 py-2 my-2 text-left space-y-1 text-[10px]">
-                          {data.items.map(item => (
+                          {data.items.map((item, index) => (
                             <div key={item.id} className="flex justify-between">
-                              <span className="truncate max-w-[140px]">{item.name}</span>
+                              <span className="truncate max-w-[140px]">{index + 1}. {item.name}</span>
                               <span>{item.quantity} x ₹{item.rate} = ₹{item.total.toFixed(2)}</span>
                             </div>
                           ))}
