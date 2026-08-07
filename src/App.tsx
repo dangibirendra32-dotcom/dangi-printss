@@ -51,6 +51,25 @@ import { motion, AnimatePresence } from 'motion/react';
 import { QRCodeSVG } from 'qrcode.react';
 import confetti from 'canvas-confetti';
 import html2canvas from 'html2canvas';
+
+// Waits for every <img> inside a container to finish loading (or fail) before
+// resolving. html2canvas captures whatever is currently painted — if a
+// custom-uploaded logo's <img> hasn't finished loading yet, it captures as
+// blank/missing instead of waiting for it.
+const waitForImagesToLoad = (container: HTMLElement): Promise<void> => {
+  const images = Array.from(container.querySelectorAll('img'));
+  if (images.length === 0) return Promise.resolve();
+  return Promise.all(
+    images.map(img =>
+      img.complete
+        ? Promise.resolve()
+        : new Promise<void>(resolve => {
+            img.addEventListener('load', () => resolve(), { once: true });
+            img.addEventListener('error', () => resolve(), { once: true });
+          })
+    )
+  ).then(() => undefined);
+};
 import { jsPDF } from 'jspdf';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
@@ -364,6 +383,35 @@ export default function App() {
     </div>`;
   };
 
+  const getRestaurantLogoHtmlForPdf = (rData: ReceiptData): string => {
+    if (rData.type !== 'RESTAURANT' || rData.restaurantLogo === 'NONE') return '';
+
+    const badge = (innerHtml: string) => `
+      <div style="display: flex; justify-content: center; margin-bottom: 8px;">
+        <div style="width: 40px; height: 40px; border: 2px solid #0f172a; border-radius: 9999px; display: flex; align-items: center; justify-content: center; font-size: 18px; line-height: 1;">
+          ${innerHtml}
+        </div>
+      </div>
+    `;
+
+    if (rData.restaurantLogo === 'CUSTOM') {
+      if (rData.restaurantCustomLogoUrl) {
+        return badge(`<img src="${rData.restaurantCustomLogoUrl}" style="width: 26px; height: 26px; object-fit: contain;" />`);
+      }
+      return badge('🍴'); // Fallback to the default utensils symbol, matching the on-screen preview's fallback behavior
+    }
+
+    const symbolByLogo: Record<Exclude<NonNullable<ReceiptData['restaurantLogo']>, 'NONE' | 'CUSTOM'>, string> = {
+      UTENSILS: '🍴',
+      COFFEE: '☕',
+      PIZZA: '🍕',
+      FLAME: '🔥',
+      BAR: '🍷',
+    };
+    const symbol = symbolByLogo[(rData.restaurantLogo || 'UTENSILS') as keyof typeof symbolByLogo] || '🍴';
+    return badge(symbol);
+  };
+
   const renderReceiptHtmlForExport = (rData: ReceiptData): string => {
     if (rData.type === 'PETROL') {
       const p = rData.petrolDetails;
@@ -413,19 +461,16 @@ export default function App() {
     const itemsHtml = (rData.items || []).map((item, index) => `
       <div style="display: flex; justify-content: space-between; align-items: flex-start; margin: 4px 0; font-size: 10px;">
         <span style="width: 8%;">${index + 1}</span>
-        <span style="width: 42%; word-break: break-word; line-height: 1.1;">${item.name || 'Unnamed Item'}</span>
-        <span style="width: 16.66%; text-align: right;">${item.quantity}</span>
-        <span style="width: 33.33%; text-align: right;">₹${(item.total || 0).toFixed(2)}</span>
+        <span style="width: 32%; word-break: break-word; line-height: 1.1;">${item.name || 'Unnamed Item'}</span>
+        <span style="width: 15%; text-align: right;">${item.quantity}</span>
+        <span style="width: 20%; text-align: right;">₹${(item.rate || 0).toFixed(2)}</span>
+        <span style="width: 25%; text-align: right;">₹${(item.total || 0).toFixed(2)}</span>
       </div>
     `).join('');
 
     return `
       <div style="width: 100%; color: #1e293b; font-family: monospace; font-size: 11px; box-sizing: border-box; background-color: #ffffff;">
-        ${rData.type === 'RESTAURANT' && rData.restaurantLogo === 'CUSTOM' && rData.restaurantCustomLogoUrl ? `
-          <div style="display: flex; justify-content: center; margin-bottom: 8px;">
-            <img src="${rData.restaurantCustomLogoUrl}" style="max-width: 80px; max-height: 80px; object-fit: contain;" />
-          </div>
-        ` : ''}
+        ${getRestaurantLogoHtmlForPdf(rData)}
         <h1 style="font-size: 14px; font-weight: 900; text-align: center; margin-bottom: 4px; line-height: 1; text-transform: uppercase; color: #0f172a;">${rData.companyName || 'STORE'}</h1>
         <p style="text-align: center; font-size: 10px; margin-bottom: 8px; white-space: normal;">${rData.address || ''}</p>
         <div style="width: 100%; height: 1px; border-bottom: 1px dashed #cbd5e1; margin: 8px 0;"></div>
@@ -443,9 +488,10 @@ export default function App() {
         <div style="width: 100%; padding: 0 4px;">
           <div style="display: flex; justify-content: space-between; font-weight: 900; font-size: 10px; margin-bottom: 4px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px;">
             <span style="width: 8%;">#</span>
-            <span style="width: 42%;">ITEM</span>
-            <span style="width: 16.66%; text-align: right;">QTY</span>
-            <span style="width: 33.33%; text-align: right;">TOTAL</span>
+            <span style="width: 32%;">ITEM</span>
+            <span style="width: 15%; text-align: right;">QTY</span>
+            <span style="width: 20%; text-align: right;">RATE</span>
+            <span style="width: 25%; text-align: right;">TOTAL</span>
           </div>
           <div style="margin-bottom: 8px;">${itemsHtml}</div>
         </div>
@@ -486,6 +532,7 @@ export default function App() {
       document.body.appendChild(tempDiv);
 
       await new Promise(resolve => setTimeout(resolve, 80));
+      await waitForImagesToLoad(tempDiv);
 
       const canvas = await html2canvas(tempDiv, {
         scale: 3,
@@ -693,6 +740,7 @@ export default function App() {
         const originalStyle = container.style.boxShadow;
         container.style.boxShadow = 'none';
         
+        await waitForImagesToLoad(container);
         const canvas = await html2canvas(container, {
           scale: 2,
           useCORS: true,
@@ -759,15 +807,16 @@ export default function App() {
         chunks.push(ThermalPrinter.textToUint8(`Bill No: ${adjusted.billNumber}`));
         chunks.push(ThermalPrinter.textToUint8(`--------------------------------`));
         
-        chunks.push(ThermalPrinter.textToUint8(`#  ITEM          QTY   TOTAL`));
+        chunks.push(ThermalPrinter.textToUint8(`#  ITEM       QTY  RATE TOTAL`));
         chunks.push(ThermalPrinter.textToUint8(`--------------------------------`));
         
         adjusted.items.forEach((item, index) => {
           const noPart = (index + 1).toString().padStart(2);
-          const namePart = item.name.substring(0, 13).padEnd(13);
+          const namePart = item.name.substring(0, 10).padEnd(10);
           const qtyPart = item.quantity.toString().padStart(3);
+          const ratePart = item.rate.toString().padStart(5);
           const totalPart = item.total.toString().padStart(6);
-          chunks.push(ThermalPrinter.textToUint8(`${noPart} ${namePart} ${qtyPart} ${totalPart}`));
+          chunks.push(ThermalPrinter.textToUint8(`${noPart} ${namePart} ${qtyPart} ${ratePart} ${totalPart}`));
         });
         
         chunks.push(ThermalPrinter.textToUint8(`--------------------------------`));
@@ -1004,6 +1053,7 @@ export default function App() {
         const originalStyle = container.style.boxShadow;
         container.style.boxShadow = 'none';
         
+        await waitForImagesToLoad(container);
         const canvas = await html2canvas(container, {
           scale: 2,
           useCORS: true,
@@ -1075,15 +1125,16 @@ export default function App() {
         chunks.push(ThermalPrinter.textToUint8(`--------------------------------`));
         
         // Header for items
-        chunks.push(ThermalPrinter.textToUint8(`#  ITEM          QTY   TOTAL`));
+        chunks.push(ThermalPrinter.textToUint8(`#  ITEM       QTY  RATE TOTAL`));
         chunks.push(ThermalPrinter.textToUint8(`--------------------------------`));
         
         data.items.forEach((item, index) => {
           const noPart = (index + 1).toString().padStart(2);
-          const namePart = item.name.substring(0, 13).padEnd(13);
+          const namePart = item.name.substring(0, 10).padEnd(10);
           const qtyPart = item.quantity.toString().padStart(3);
+          const ratePart = item.rate.toString().padStart(5);
           const totalPart = item.total.toString().padStart(6);
-          chunks.push(ThermalPrinter.textToUint8(`${noPart} ${namePart} ${qtyPart} ${totalPart}`));
+          chunks.push(ThermalPrinter.textToUint8(`${noPart} ${namePart} ${qtyPart} ${ratePart} ${totalPart}`));
         });
         
         chunks.push(ThermalPrinter.textToUint8(`--------------------------------`));
@@ -2249,17 +2300,19 @@ export default function App() {
                     <div className="w-full px-1">
                       <div className="flex justify-between font-black text-[10px] mb-1">
                         <span className="w-[8%]">#</span>
-                        <span className="w-[42%]">ITEM</span>
-                        <span className="w-1/6 text-right">QTY</span>
-                        <span className="w-1/3 text-right">TOTAL</span>
+                        <span className="w-[32%]">ITEM</span>
+                        <span className="w-[15%] text-right">QTY</span>
+                        <span className="w-[20%] text-right">RATE</span>
+                        <span className="w-[25%] text-right">TOTAL</span>
                       </div>
                       <div className="space-y-1 mb-2">
                         {data.items.map((item, index) => (
                           <div key={item.id} className="flex justify-between items-start">
                             <span className="w-[8%]">{index + 1}</span>
-                            <span className="w-[42%] break-words leading-[1]">{item.name || 'Unnamed Item'}</span>
-                            <span className="w-1/6 text-right">{item.quantity}</span>
-                            <span className="w-1/3 text-right">₹{item.total.toFixed(2)}</span>
+                            <span className="w-[32%] break-words leading-[1]">{item.name || 'Unnamed Item'}</span>
+                            <span className="w-[15%] text-right">{item.quantity}</span>
+                            <span className="w-[20%] text-right">₹{item.rate.toFixed(2)}</span>
+                            <span className="w-[25%] text-right">₹{item.total.toFixed(2)}</span>
                           </div>
                         ))}
                       </div>
