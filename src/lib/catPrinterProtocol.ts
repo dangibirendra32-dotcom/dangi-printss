@@ -19,10 +19,12 @@ export const CAT_PRINTER_WIDTH = 384; // dots per line (standard for 58mm/2" cat
 // BLE identifiers used by this family of printers.
 export const CAT_PRINTER_SERVICE_UUIDS = [
   '0000ae30-0000-1000-8000-00805f9b34fb',
+  '0000ae3a-0000-1000-8000-00805f9b34fb',
   '0000af30-0000-1000-8000-00805f9b34fb',
 ];
 export const CAT_PRINTER_TX_CHARACTERISTIC_UUID = '0000ae01-0000-1000-8000-00805f9b34fb';
 export const CAT_PRINTER_RX_CHARACTERISTIC_UUID = '0000ae02-0000-1000-8000-00805f9b34fb';
+export const CAT_PRINTER_ALT_TX_CHARACTERISTIC_UUID = '0000ae03-0000-1000-8000-00805f9b34fb';
 
 // Signed-byte command IDs converted to their unsigned (0-255) form.
 const CMD = {
@@ -92,33 +94,26 @@ const CMD_SET_PAPER = packet(CMD.SET_PAPER, [48, 0]);
 const CMD_LATTICE_START = packet(CMD.LATTICE, [0xaa, 0x55, 0x17, 0x38, 0x44, 0x5f, 0x5f, 0x5f, 0x44, 0x38, 0x2c]);
 const CMD_LATTICE_END = packet(CMD.LATTICE, [0xaa, 0x55, 0x17, 0, 0, 0, 0, 0, 0, 0, 0x17]);
 
-function runLengthEncodeRow(row: boolean[]): number[] {
-  const out: number[] = [];
-  let count = 0;
-  let last = -1;
-  const flush = (n: number, val: number) => {
-    while (n > 0x7f) {
-      out.push(0x7f | (val << 7));
-      n -= 0x7f;
-    }
-    if (n > 0) out.push((val << 7) | n);
-  };
-  for (const px of row) {
-    const val = px ? 1 : 0;
-    if (val === last) {
-      count++;
-    } else {
-      if (count > 0) flush(count, last);
-      count = 1;
-      last = val;
-    }
+/**
+ * CatPrinter PD01/GB-series devices accept one uncompressed bitmap row with
+ * command 0xA2. The row is 1 bit per pixel, LSB-first, 48 bytes for 384 dots.
+ * This is deliberately used instead of the older 0xBF RLE path because the
+ * small Android cat printers are much more consistently compatible with the
+ * documented 0xA2 bitmap command.
+ */
+function rowToBitmapBytes(row: boolean[]): number[] {
+  const width = CAT_PRINTER_WIDTH;
+  const out = new Array<number>(Math.ceil(width / 8)).fill(0);
+  for (let x = 0; x < width; x++) {
+    if (!row[x]) continue;
+    // CatPrinter bitmap format is LSB-first: x=0 uses bit 0.
+    out[Math.floor(x / 8)] |= 1 << (x % 8);
   }
-  if (count > 0) flush(count, last);
   return out;
 }
 
 function cmdPrintRow(row: boolean[]): number[] {
-  return packet(CMD.PRINT_ROW_RLE, runLengthEncodeRow(row));
+  return packet(CMD.PRINT_ROW_UNCOMPRESSED, rowToBitmapBytes(row));
 }
 
 // ENERGY_LEVELS: Different energy settings for cat printers

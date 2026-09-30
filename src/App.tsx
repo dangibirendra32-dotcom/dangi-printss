@@ -69,57 +69,14 @@ const waitForImagesToLoad = (container: HTMLElement): Promise<void> => {
     try { if (typeof img.decode === 'function') await img.decode(); } catch { /* WebView fallback */ }
   })).then(() => undefined);
 };
-
-// html2canvas does not reliably honour `object-fit: contain`, which is why a
-// custom logo could look squashed/stretched in exported PDFs and prints even
-// though the live preview looked fine. Any <img data-fit-box="WxH"> is
-// re-drawn ("contain"-fitted) onto an exact WxH canvas so the captured logo
-// keeps its aspect ratio. Returns a function that restores the original src.
-const fitLogosToBoxes = async (root: HTMLElement): Promise<() => void> => {
-  const restores: Array<() => void> = [];
-  const imgs = Array.from(root.querySelectorAll<HTMLImageElement>('img[data-fit-box]'));
-  for (const img of imgs) {
-    const [bw, bh] = (img.dataset.fitBox || '').split('x').map(Number);
-    if (!bw || !bh || !img.naturalWidth || !img.naturalHeight) continue;
-    try {
-      const scale = 4;
-      const canvas = document.createElement('canvas');
-      canvas.width = bw * scale;
-      canvas.height = bh * scale;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) continue;
-      const ratio = Math.min(canvas.width / img.naturalWidth, canvas.height / img.naturalHeight);
-      const dw = img.naturalWidth * ratio;
-      const dh = img.naturalHeight * ratio;
-      ctx.drawImage(img, (canvas.width - dw) / 2, (canvas.height - dh) / 2, dw, dh);
-      const dataUrl = canvas.toDataURL('image/png');
-      const oldSrc = img.getAttribute('src') || '';
-      const oldStyle = img.getAttribute('style');
-      img.setAttribute('src', dataUrl);
-      img.style.objectFit = 'fill';
-      img.style.width = `${bw}px`;
-      img.style.height = `${bh}px`;
-      restores.push(() => {
-        img.setAttribute('src', oldSrc);
-        if (oldStyle === null) img.removeAttribute('style'); else img.setAttribute('style', oldStyle);
-      });
-    } catch {
-      // Tainted canvas or decode failure: leave the image untouched.
-    }
-  }
-  await waitForImagesToLoad(root);
-  return () => restores.forEach(r => r());
-};
 import { jsPDF } from 'jspdf';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 
-import { renderToStaticMarkup } from 'react-dom/server';
 import { BillType, ReceiptData, ReceiptItem, PetrolCompany, HistoryItem } from './types';
 import { ThermalPrinter } from './lib/printer';
 import { PETROL_LOGOS, COMMON_ADDRESSES } from './constants';
-import { getStationRows, buildStationEscPos, escapeHtml } from './lib/petrolStation';
 
 const INITIAL_ITEMS: ReceiptItem[] = [
   { id: '1', name: 'Sample Item 1', quantity: 1, rate: 100, total: 100 }
@@ -146,9 +103,13 @@ export default function App() {
     fontSize: 'medium',
     fontStyle: 'normal',
     showGst: true,
-    petrolFormat: 'CLASSIC',
     petrolDetails: {
       company: 'JIO_BP',
+      format: 'OLD',
+      transactionId: '',
+      dealerName: 'HPCL',
+      density: 835.7,
+      preset: 'NON PRESET',
       telNo: '7633481',
       receiptNo: '6563',
       fccId: '',
@@ -402,14 +363,14 @@ export default function App() {
 
   const getPetrolLogoHtmlForPdf = (p?: ReceiptData['petrolDetails']): string => {
     const company = p?.company || 'JIO_BP';
-    if (company === 'CUSTOM') {
-      if (p?.customLogoUrl) {
-        return `<div style="display: flex; justify-content: center; align-items: center; width: 100%; margin: 4px 0 8px 0;">
-          <img src="${p.customLogoUrl}" style="max-width: 150px; max-height: 100px; object-fit: contain;" />
-        </div>`;
-      }
-      return '';
+    // An uploaded logo always wins. This keeps the NEW_HP format editable just
+    // like the old format instead of locking it to the selected company logo.
+    if (p?.customLogoUrl) {
+      return `<div style="display:flex;justify-content:center;align-items:center;width:100%;height:120px;margin:4px 0 8px 0;overflow:hidden;">
+        <img src="${p.customLogoUrl}" style="display:block;max-width:150px;max-height:110px;width:auto;height:auto;object-fit:contain;" />
+      </div>`;
     }
+    if (company === 'CUSTOM') return '';
 
     const logoSrcByCompany: Record<Exclude<PetrolCompany, 'CUSTOM'>, string> = {
       JIO_BP: '/logos/jio-bp.svg',
@@ -429,83 +390,93 @@ export default function App() {
   const getRestaurantLogoHtmlForPdf = (rData: ReceiptData): string => {
     if (rData.type !== 'RESTAURANT' || rData.restaurantLogo === 'NONE') return '';
 
-    // Same fixed 52x52 ring + same lucide icons (24px) as the live preview,
-    // so history/custom exports match Preview exactly.
     const badge = (innerHtml: string) => `
-      <div style="display:flex; justify-content:center; align-items:center; width:100%; margin-bottom:16px;">
-        <div style="width:52px; height:52px; min-width:52px; min-height:52px; box-sizing:border-box; border:2px solid #0f172a; border-radius:9999px; display:flex; align-items:center; justify-content:center; overflow:hidden; line-height:0;">
+      <div style="display:flex; justify-content:center; align-items:center; width:100%; height:48px; margin-bottom:10px;">
+        <div style="width:44px; height:44px; min-width:44px; min-height:44px; box-sizing:border-box; border:2px solid #0f172a; border-radius:9999px; display:flex; align-items:center; justify-content:center; overflow:hidden; line-height:0;">
           ${innerHtml}
         </div>
       </div>
     `;
-    const icon = (node: React.ReactElement) => renderToStaticMarkup(node);
 
-    if (rData.restaurantLogo === 'CUSTOM' && rData.restaurantCustomLogoUrl) {
-      return badge(`<img src="${rData.restaurantCustomLogoUrl}" width="32" height="32" data-fit-box="32x32" style="display:block; width:32px; height:32px; min-width:32px; min-height:32px; max-width:none; object-fit:contain; flex:0 0 32px;" />`);
+    if (rData.restaurantLogo === 'CUSTOM') {
+      if (rData.restaurantCustomLogoUrl) {
+        return badge(`<img src="${rData.restaurantCustomLogoUrl}" width="28" height="28" style="display:block; width:28px; height:28px; max-width:28px; max-height:28px; object-fit:contain; flex:0 0 28px;" />`);
+      }
+      return badge('<span style="display:flex; align-items:center; justify-content:center; width:28px; height:28px; font-family:Arial,sans-serif; font-size:8px; font-weight:900; letter-spacing:.4px;">UTENSILS</span>');
     }
-    switch (rData.restaurantLogo) {
-      case 'COFFEE': return badge(icon(<Coffee size={24} color="#0f172a" />));
-      case 'PIZZA': return badge(icon(<Pizza size={24} color="#0f172a" />));
-      case 'FLAME': return badge(icon(<Flame size={24} color="#0f172a" />));
-      case 'BAR': return badge(icon(<Wine size={24} color="#0f172a" />));
-      default: return badge(icon(<Utensils size={24} color="#0f172a" />));
-    }
+
+    const symbolByLogo: Record<Exclude<NonNullable<ReceiptData['restaurantLogo']>, 'NONE' | 'CUSTOM'>, string> = {
+      UTENSILS: 'UTENSILS', COFFEE: 'CAFE', PIZZA: 'PIZZA', FLAME: 'GRILL', BAR: 'BAR',
+    };
+    const symbol = symbolByLogo[(rData.restaurantLogo || 'UTENSILS') as keyof typeof symbolByLogo] || 'UTENSILS';
+    return badge(`<span style="display:flex; align-items:center; justify-content:center; width:28px; height:28px; font-family:Arial,sans-serif; font-size:8px; font-weight:900; letter-spacing:.4px; text-align:center;">${symbol}</span>`);
   };
 
   const renderReceiptHtmlForExport = (rData: ReceiptData): string => {
-    if (rData.type === 'PETROL' && rData.petrolFormat === 'STATION') {
-      const sp = rData.petrolDetails;
-      const rowsHtml = getStationRows(rData).map(([l, v]) => `
-        <div style="display:flex; align-items:baseline; margin:0 0 9px 0; line-height:1.25;">
-          <span style="width:92px; flex:0 0 92px; white-space:nowrap;">${l}</span>
-          <span style="flex:0 0 12px;">:</span>
-          <span style="flex:1; min-width:0; overflow-wrap:anywhere; padding-left:4px;">${escapeHtml(v)}</span>
-        </div>`).join('');
-      return `
-        <div style="width:100%; color:#000000; font-family:monospace; font-size:13px; font-weight:900; text-shadow:0.45px 0 0 #000000; box-sizing:border-box; background-color:#ffffff;">
-          ${getPetrolLogoHtmlForPdf(sp)}
-          <div style="text-transform:uppercase; font-size:14px; line-height:1.3; margin:6px 0 14px 0; overflow-wrap:anywhere;">
-            <div>${escapeHtml(rData.companyName || '')}</div>
-            ${sp?.dealerLine ? `<div>${escapeHtml(sp.dealerLine)}</div>` : ''}
-            <div>${escapeHtml(rData.address || '')}</div>
-          </div>
-          ${rowsHtml}
-          <div style="text-align:center; margin-top:22px; margin-bottom:8px; font-size:12px; text-transform:uppercase;">Thank You! Visit Again</div>
-        </div>
-      `;
-    }
     if (rData.type === 'PETROL') {
       const p = rData.petrolDetails;
+      if (p?.format === 'NEW_HP') {
+        const row = (label: string, value: string, bold = false) => `<div style="display:grid;grid-template-columns:45% 55%;column-gap:8px;align-items:baseline;margin:0 0 6px 0;line-height:1.25;${bold ? 'font-weight:900;' : ''}"><span>${label}</span><span style="text-align:right;overflow-wrap:anywhere;word-break:break-word;">${value}</span></div>`;
+        return `
+          <div style="width:100%;color:#111827;font-family:monospace;font-size:12px;font-weight:800;box-sizing:border-box;background:#fff;">
+            ${getPetrolLogoHtmlForPdf(p)}
+            <div style="text-align:center;font-size:13px;font-weight:900;text-transform:uppercase;line-height:1.1;">${(rData.companyName || '').toUpperCase()}</div>
+            <div style="text-align:center;font-size:10px;font-weight:900;margin-top:3px;">DEALERS:- ${p?.dealerName || 'HPCL'}</div>
+            <div style="text-align:center;font-size:10px;font-weight:900;margin-top:3px;line-height:1.2;">${rData.address || ''}</div>
+            <div style="margin:10px 0 9px;border-top:2px solid #111827;border-bottom:2px solid #111827;padding:8px 0 4px;">
+              ${row('B1TT NO:', rData.billNumber || p.receiptNo || '')}
+              ${row('Trns. ID:', p.transactionId || '')}
+              ${row('Atnd. ID:', p.attendantId || '')}
+              ${row('Vehi. No:', p.vehicleNumber || '')}
+              ${row('Date', rData.date || '')}
+              ${row('Time', rData.time || '')}
+              ${row('FP. ID', p.fipNo || '')}
+              ${row('Nozl. No:', p.nozzleNo || '')}
+            </div>
+            <div style="font-size:12px;">
+              ${row('Fuel', p.product || 'Petrol')}
+              ${row('Density', `${(p.density ?? 835.7).toFixed(1)} kg/m3`)}
+              ${row('Preset', p.preset || 'NON PRESET')}
+              ${row('Rate', `Rs.${(p.ratePerLtr || 0).toFixed(2)}`, true)}
+              ${row('Sale', `Rs.${(p.amount || 0).toFixed(2)}`, true)}
+              ${row('Volume', `${(p.volumeLtr || 0).toFixed(2)} Lts.`, true)}
+            </div>
+            <div style="text-align:center;margin-top:18px;border-top:1px dashed #9ca3af;padding-top:8px;">
+              <div style="font-size:10px;font-weight:900;text-transform:uppercase;">Thank You! Visit Again</div>
+              <div style="font-size:8px;margin-top:4px;font-weight:700;">SAVE FUEL, SAVE MONEY, SAVE THE PLANET.</div>
+            </div>
+          </div>`;
+      }
       const petrolRow = (label: string, value: string) => `
         <div style="display:grid; grid-template-columns:48% 52%; column-gap:6px; align-items:baseline; margin:0 0 7px 0; line-height:1.25; font-weight:900;">
           <span style="white-space:nowrap;">${label}</span><span style="text-align:right; overflow-wrap:anywhere; word-break:break-word;">${value}</span>
         </div>`;
       return `
-        <div style="width:100%; color:#000000; text-shadow:0.45px 0 0 #000000; font-family:monospace; font-size:13px; font-weight:900; box-sizing:border-box; background-color:#ffffff;">
+        <div style="width:100%; color:#111827; font-family:monospace; font-size:12px; font-weight:900; box-sizing:border-box; background-color:#ffffff;">
           ${getPetrolLogoHtmlForPdf(p)}
-          <div style="text-align: center; font-weight: 900; font-size:13px; margin-bottom: 8px; margin-top: 4px;">WELCOME!!!</div>
-          <div style="text-align: center; font-size:12px; margin-bottom: 8px; line-height: 1.2; font-weight: 900; text-transform: uppercase;">${(rData.companyName || '').toUpperCase()}</div>
-          <div style="text-align: center; font-size:11px; margin-bottom: 16px; line-height: 1.2;">${rData.address || ''}</div>
+          <div style="text-align: center; font-weight: 900; font-size: 12px; margin-bottom: 8px; margin-top: 4px;">WELCOME!!!</div>
+          <div style="text-align: center; font-size: 11px; margin-bottom: 8px; line-height: 1.2; font-weight: 900; text-transform: uppercase;">${(rData.companyName || '').toUpperCase()}</div>
+          <div style="text-align: center; font-size: 10px; margin-bottom: 16px; line-height: 1.2;">${rData.address || ''}</div>
           
-          <div style="font-size:12px; margin:0 0 14px 0; border-top:1px dashed #9ca3af; border-bottom:1px dashed #9ca3af; padding:10px 0 7px 0;">
+          <div style="font-size:11px; margin:0 0 14px 0; border-top:1px dashed #9ca3af; border-bottom:1px dashed #9ca3af; padding:10px 0 7px 0;">
             ${petrolRow('TEL NO:', p?.telNo || '')}
             ${petrolRow('RECEIPT NO:', p?.receiptNo || '')}
             ${petrolRow('FCC ID:', p?.fccId || 'N/A')}
             ${petrolRow('FIP NO:', p?.fipNo || 'N/A')}
             ${petrolRow('NOZZLE NO:', p?.nozzleNo || 'N/A')}
           </div>
-          <div style="font-size:13px; margin:0 0 14px 0; padding:10px 0 6px 0; border-bottom:1px dashed #9ca3af; font-weight:900;">
+          <div style="font-size:12px; margin:0 0 14px 0; padding:10px 0 6px 0; border-bottom:1px dashed #9ca3af; font-weight:900;">
             ${petrolRow('PRODUCT:', p?.product || '')}
             ${petrolRow('RATE/LTR:', (p?.ratePerLtr || 0).toFixed(2))}
             ${petrolRow('AMOUNT:', `₹${(p?.amount || 0).toFixed(2)}`)}
             ${petrolRow('VOLUME(LTR):', `${(p?.volumeLtr || 0).toFixed(2)} lt`)}
           </div>
-          <div style="font-size:12px; margin-bottom:14px;">
+          <div style="font-size:11px; margin-bottom:14px;">
             ${petrolRow('VEH TYPE:', p?.vehType || '')}
             ${petrolRow('VEH NO:', p?.vehicleNumber || '')}
             ${petrolRow('CUSTOMER:', p?.customerName || '')}
           </div>
-          <div style="font-size:12px; padding-top:10px; border-top:1px dashed #9ca3af;">
+          <div style="font-size:11px; padding-top:10px; border-top:1px dashed #9ca3af;">
             ${petrolRow('DATE:', `${rData.date || ''} ${rData.time || ''}`)}
             ${petrolRow('MODE:', rData.paymentMode || '')}
             ${petrolRow('VAT NO:', p?.vatNo || 'N/A')}
@@ -513,8 +484,8 @@ export default function App() {
           </div>
 
           <div style="text-align: center; margin-top: 24px; margin-bottom: 8px;">
-            <div style="font-weight: 900; font-size:13px; text-transform: uppercase;">Thank You! Visit Again</div>
-            <div style="font-size:8px; margin-top: 4px; font-weight: 700;">SAVE FUEL, SAVE MONEY, SAVE THE PLANET.</div>
+            <div style="font-weight: 900; font-size: 12px; text-transform: uppercase;">Thank You! Visit Again</div>
+            <div style="font-size: 8px; margin-top: 4px; font-weight: 700;">SAVE FUEL, SAVE MONEY, SAVE THE PLANET.</div>
           </div>
         </div>
       `;
@@ -535,7 +506,7 @@ export default function App() {
         ${getRestaurantLogoHtmlForPdf(rData)}
         <h1 style="font-size:${rData.type === 'RESTAURANT' ? '15px' : '14px'}; font-weight:900; text-align:center; margin-bottom:4px; line-height:1; text-transform:uppercase; color:#0f172a;">${rData.companyName || 'STORE'}</h1>
         <p style="text-align:center; font-size:10px; margin-bottom:6px; white-space:normal;">${rData.address || ''}</p>
-        ${rData.type === 'RESTAURANT' ? `<div style="text-align:center; font-size:8px; font-weight:900; letter-spacing:2px; margin-bottom:8px;">DINING • ORDER RECEIPT</div>` : `<div style="text-align:center; font-size:8px; font-weight:900; letter-spacing:2px; margin-bottom:8px;">RETAIL • TAX INVOICE</div>`}
+        ${rData.type === 'RESTAURANT' ? `<div style="text-align:center; font-size:8px; font-weight:900; letter-spacing:2px; margin-bottom:8px;">DINING • ORDER RECEIPT</div>` : ''}
         <div style="width:100%; height:1px; border-bottom:1px dashed #cbd5e1; margin:8px 0;"></div>
 
         <div style="width:100%; font-size:10px; padding:${rData.type === 'RESTAURANT' ? '7px 5px' : '0 4px'}; margin-bottom:6px; box-sizing:border-box; ${rData.type === 'RESTAURANT' ? 'background:#f8fafc; border:1px solid #cbd5e1; border-radius:5px;' : ''}">
@@ -570,11 +541,37 @@ export default function App() {
         </div>
 
         <div style="width: 100%; height: 1px; border-bottom: 1px dashed #cbd5e1; margin: 16px 0 12px 0;"></div>
-        ${rData.type === 'RESTAURANT'
-          ? `<p style="text-align:center; font-weight:900; margin-top:12px; text-transform:uppercase; font-size:11px; letter-spacing:1px;">★ Thank you for dining ★</p><p style="text-align:center; font-size:9px; margin-top:2px;">We hope to serve you again</p>`
-          : `<p style="text-align:center; font-weight:700; margin-top:12px; text-transform:uppercase; font-size:11px;">Thank You! Visit Again</p><p style="text-align:center; font-size:8px; margin-top:3px;">Goods once sold will not be taken back</p>`}
+        <p style="text-align: center; font-weight: 700; margin-top: 12px; text-transform: uppercase; font-size: 11px;">Thank You! Visit Again</p>
       </div>
     `;
+  };
+
+  const captureReceiptCanvas = async (rData: ReceiptData, scale = 2): Promise<HTMLCanvasElement> => {
+    const tempDiv = document.createElement('div');
+    tempDiv.style.position = 'fixed';
+    tempDiv.style.top = '-10000px';
+    tempDiv.style.left = '-10000px';
+    tempDiv.style.width = '288px';
+    tempDiv.style.padding = '24px 16px';
+    tempDiv.style.backgroundColor = '#ffffff';
+    tempDiv.style.color = '#111827';
+    tempDiv.style.boxSizing = 'border-box';
+    tempDiv.style.fontFamily = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
+    tempDiv.innerHTML = renderReceiptHtmlForExport(rData);
+    document.body.appendChild(tempDiv);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 60));
+      await waitForImagesToLoad(tempDiv);
+      return await html2canvas(tempDiv, {
+        scale,
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: '#ffffff',
+        logging: false,
+      });
+    } finally {
+      if (document.body.contains(tempDiv)) document.body.removeChild(tempDiv);
+    }
   };
 
   const handleExportPdf = async (customData?: ReceiptData) => {
@@ -582,81 +579,19 @@ export default function App() {
     setIsExportingPdf(true);
 
     try {
-      const tempDiv = document.createElement('div');
-      tempDiv.style.position = 'fixed';
-      tempDiv.style.top = '-9999px';
-      tempDiv.style.left = '-9999px';
-      tempDiv.style.width = '288px';
-      tempDiv.style.backgroundColor = '#ffffff';
-      tempDiv.style.color = '#1e293b';
-      tempDiv.style.boxSizing = 'border-box';
-      tempDiv.style.zIndex = '-9999';
-      tempDiv.style.fontFamily = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
-      const liveReceipt = !customData ? document.getElementById('receipt-paper-container') : null;
-      if (liveReceipt) {
-        const clone = liveReceipt.cloneNode(true) as HTMLElement;
-        clone.removeAttribute('id');
-        clone.style.width = '288px';
-        clone.style.margin = '0';
-        clone.style.boxShadow = 'none';
-        clone.style.transform = 'none';
-        tempDiv.appendChild(clone);
-      } else {
-        tempDiv.style.padding = '24px 16px';
-        tempDiv.innerHTML = renderReceiptHtmlForExport(targetData);
-      }
-      document.body.appendChild(tempDiv);
-
-      await new Promise(resolve => setTimeout(resolve, 100));
-      await waitForImagesToLoad(tempDiv);
-      await fitLogosToBoxes(tempDiv);
-
-      const canvas = await html2canvas(tempDiv, {
-        scale: 3,
-        useCORS: true,
-        allowTaint: true,
-        backgroundColor: '#ffffff',
-        logging: false,
-        onclone: (clonedDoc) => {
-          // Replace oklch(...) in all style elements to avoid html2canvas CSS parsing errors
-          const styleTags = clonedDoc.querySelectorAll('style');
-          styleTags.forEach(style => {
-            if (style.textContent && style.textContent.includes('oklch')) {
-              style.textContent = style.textContent.replace(/oklch\([^)]+\)/gi, '#000000');
-            }
-          });
-          const elementsWithStyle = clonedDoc.querySelectorAll('[style]');
-          elementsWithStyle.forEach(el => {
-            const styleAttr = el.getAttribute('style');
-            if (styleAttr && styleAttr.includes('oklch')) {
-              el.setAttribute('style', styleAttr.replace(/oklch\([^)]+\)/gi, '#000000'));
-            }
-          });
-        },
-      });
-
-      if (document.body.contains(tempDiv)) {
-        document.body.removeChild(tempDiv);
-      }
-
+      const canvas = await captureReceiptCanvas(targetData, 3);
       const imgData = canvas.toDataURL('image/png');
-
-      let pdf: jsPDF;
       const sanitizedCompName = (targetData.companyName || 'Bill').replace(/[^a-zA-Z0-9]/g, '_');
       const sanitizedBillNo = (targetData.billNumber || targetData.petrolDetails?.receiptNo || 'Receipt').replace(/[^a-zA-Z0-9]/g, '_');
       const fileName = `${sanitizedCompName}_${sanitizedBillNo}_${targetData.date || 'Export'}.pdf`;
 
+      let pdf: jsPDF;
       if (pdfExportFormat === 'A4') {
-        pdf = new jsPDF({
-          orientation: 'portrait',
-          unit: 'mm',
-          format: 'a4',
-        });
+        pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
         const targetWidth = 110;
         const targetHeight = (canvas.height * targetWidth) / canvas.width;
         const xPos = (210 - targetWidth) / 2;
         const yPos = 20;
-
         pdf.setDrawColor(220, 225, 230);
         pdf.setFillColor(250, 252, 255);
         pdf.roundedRect(xPos - 5, yPos - 5, targetWidth + 10, targetHeight + 10, 3, 3, 'FD');
@@ -665,47 +600,30 @@ export default function App() {
         const pdfWidth = pdfExportFormat === '58MM' ? 58 : 80;
         const minHeight = pdfExportFormat === '58MM' ? 30 : 40;
         const pdfHeight = Math.max((canvas.height * pdfWidth) / canvas.width, minHeight);
-
-        pdf = new jsPDF({
-          orientation: 'portrait',
-          unit: 'mm',
-          format: [pdfWidth, pdfHeight],
-        });
-
+        pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: [pdfWidth, pdfHeight] });
         pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
       }
 
       if (Capacitor.isNativePlatform()) {
-        // pdf.save() relies on the browser's native download behavior
-        // (a synthetic <a download> click), which does not work reliably
-        // inside an installed Android app's WebView. Instead, write the
-        // file to the app's cache directory and open the native share
-        // sheet, which lets the user save it, send it via WhatsApp, etc.
         const dataUri = pdf.output('datauristring');
-        const base64Data = dataUri.split('base64,')[1] || '';
-        const writeResult = await Filesystem.writeFile({
-          path: fileName,
-          data: base64Data,
-          directory: Directory.Cache,
-        });
-        await Share.share({
-          title: fileName,
-          url: writeResult.uri,
-          dialogTitle: 'Save or share PDF',
-        });
+        const base64Index = dataUri.indexOf('base64,');
+        const base64Data = base64Index >= 0 ? dataUri.substring(base64Index + 7) : '';
+        if (!base64Data) throw new Error('PDF data was empty.');
+        const safeFileName = fileName.endsWith('.pdf') ? fileName : `${fileName}.pdf`;
+        const writeResult = await Filesystem.writeFile({ path: safeFileName, data: base64Data, directory: Directory.Cache });
+        const canShare = await Share.canShare();
+        if (canShare.value) {
+          await Share.share({ title: safeFileName, text: 'Bill PDF', url: writeResult.uri, dialogTitle: 'Save or share PDF' });
+        } else {
+          alert(`PDF created successfully. Saved as ${safeFileName} in app cache.`);
+        }
       } else {
         pdf.save(fileName);
       }
 
       try {
-        confetti({
-          particleCount: 40,
-          spread: 60,
-          origin: { y: 0.8 },
-        });
-      } catch (e) {
-        // ignore
-      }
+        confetti({ particleCount: 40, spread: 60, origin: { y: 0.8 } });
+      } catch { /* ignore */ }
     } catch (err: any) {
       console.error('PDF Export Error:', err);
       alert('Failed to export PDF: ' + (err?.message || String(err)));
@@ -802,35 +720,10 @@ export default function App() {
       }
 
       if (printer.getPrinterType() === 'catprinter') {
-        const originalData = { ...data };
-        setData(adjusted);
-        
-        // Wait 150ms for React state to batch and update DOM
-        await new Promise(resolve => setTimeout(resolve, 150));
-        
-        const container = document.getElementById('receipt-paper-container');
-        if (!container) {
-          setData(originalData);
-          throw new Error("Receipt preview container not found.");
-        }
-        
-        const originalStyle = container.style.boxShadow;
-        container.style.boxShadow = 'none';
-        
-        await waitForImagesToLoad(container);
-        const restoreLogos = await fitLogosToBoxes(container);
-        const canvas = await html2canvas(container, {
-          scale: 2,
-          useCORS: true,
-          logging: false,
-          backgroundColor: '#FFFFFF'
-        });
-        
-        container.style.boxShadow = originalStyle;
-        restoreLogos();
-        setData(originalData); // Restore original active tab/data
-        
-        const bytes = ThermalPrinter.canvasToCatPrinter(canvas);
+        // Capture the same dependency-free inline receipt renderer used by PDF
+        // export. This avoids Android WebView/Tailwind CSS rendering issues.
+        const canvas = await captureReceiptCanvas(adjusted, 2);
+        const bytes = ThermalPrinter.canvasToCatPrinter(canvas, printer.getCatPrinterEnergy());
         await printer.print(bytes);
         setShowQuickReprintModal(false);
         saveToHistory(adjusted);
@@ -845,39 +738,63 @@ export default function App() {
       chunks.push(cmds.ALIGN_CENTER);
       chunks.push(cmds.BOLD_ON);
 
-      if (adjusted.type === 'PETROL' && adjusted.petrolFormat === 'STATION') {
-        chunks.push(...buildStationEscPos(adjusted));
-      } else if (adjusted.type === 'PETROL') {
+      if (adjusted.type === 'PETROL') {
+        const p = adjusted.petrolDetails;
         chunks.push(cmds.BOLD_ON);
-        chunks.push(cmds.TEXT_SIZE_LARGE);
-        chunks.push(ThermalPrinter.textToUint8("WELCOME!!!"));
-        chunks.push(ThermalPrinter.textToUint8(`${adjusted.companyName.toUpperCase()}`));
-        chunks.push(cmds.TEXT_SIZE_NORMAL);
-        chunks.push(ThermalPrinter.textToUint8(adjusted.address));
-        chunks.push(ThermalPrinter.textToUint8(`TEL NO: ${adjusted.petrolDetails?.telNo}`));
-        chunks.push(ThermalPrinter.textToUint8(`RECEIPT NO: ${adjusted.petrolDetails?.receiptNo}`));
-        chunks.push(ThermalPrinter.textToUint8(`FCC ID: ${adjusted.petrolDetails?.fccId}`));
-        chunks.push(ThermalPrinter.textToUint8(`FIP NO: ${adjusted.petrolDetails?.fipNo}`));
-        chunks.push(ThermalPrinter.textToUint8(`NOZZLE NO: ${adjusted.petrolDetails?.nozzleNo}`));
-        
-        chunks.push(cmds.ALIGN_LEFT);
-        chunks.push(cmds.BOLD_ON);
-        chunks.push(cmds.TEXT_SIZE_LARGE);
-        chunks.push(ThermalPrinter.textToUint8(`PRODUCT: ${adjusted.petrolDetails?.product}`));
-        chunks.push(ThermalPrinter.textToUint8(`RATE/LTR: ${adjusted.petrolDetails?.ratePerLtr.toFixed(2)}`));
-        chunks.push(ThermalPrinter.textToUint8(`AMOUNT: ${adjusted.petrolDetails?.amount.toFixed(2)}`));
-        chunks.push(ThermalPrinter.textToUint8(`VOLUME(LTR): ${adjusted.petrolDetails?.volumeLtr.toFixed(2)} lt`));
-        chunks.push(cmds.TEXT_SIZE_NORMAL);
-        chunks.push(ThermalPrinter.textToUint8(` `));
-        chunks.push(ThermalPrinter.textToUint8(`VEH TYPE: ${adjusted.petrolDetails?.vehType}`));
-        chunks.push(ThermalPrinter.textToUint8(`VEH NO: ${adjusted.petrolDetails?.vehicleNumber}`));
-        chunks.push(ThermalPrinter.textToUint8(`CUSTOMER: ${adjusted.petrolDetails?.customerName || ''}`));
-        chunks.push(ThermalPrinter.textToUint8(` `));
-        chunks.push(ThermalPrinter.textToUint8(`DATE: ${adjusted.date} ${adjusted.time}`));
-        chunks.push(ThermalPrinter.textToUint8(`MODE: ${adjusted.paymentMode}`));
-        chunks.push(ThermalPrinter.textToUint8(`LST NO: ${adjusted.petrolDetails?.lstNo}`));
-        chunks.push(ThermalPrinter.textToUint8(`VAT NO: ${adjusted.petrolDetails?.vatNo}`));
-        chunks.push(ThermalPrinter.textToUint8(`ATTENDANT: ${adjusted.petrolDetails?.attendantId}`));
+        if (p?.format === 'NEW_HP') {
+          chunks.push(cmds.ALIGN_CENTER);
+          chunks.push(cmds.TEXT_SIZE_NORMAL);
+          chunks.push(ThermalPrinter.textToUint8(adjusted.companyName.toUpperCase()));
+          chunks.push(ThermalPrinter.textToUint8(`DEALERS:- ${p?.dealerName || 'HPCL'}`));
+          chunks.push(ThermalPrinter.textToUint8(adjusted.address));
+          chunks.push(cmds.ALIGN_LEFT);
+          chunks.push(ThermalPrinter.textToUint8('--------------------------------'));
+          chunks.push(ThermalPrinter.textToUint8(`B1TT NO: ${adjusted.billNumber || p.receiptNo || ''}`));
+          chunks.push(ThermalPrinter.textToUint8(`Trns. ID: ${p.transactionId || ''}`));
+          chunks.push(ThermalPrinter.textToUint8(`Atnd. ID: ${p.attendantId || ''}`));
+          chunks.push(ThermalPrinter.textToUint8(`Vehi. No: ${p.vehicleNumber || ''}`));
+          chunks.push(ThermalPrinter.textToUint8(`Date    : ${adjusted.date}`));
+          chunks.push(ThermalPrinter.textToUint8(`Time    : ${adjusted.time}`));
+          chunks.push(ThermalPrinter.textToUint8(`FP. ID  : ${p.fipNo || ''}`));
+          chunks.push(ThermalPrinter.textToUint8(`Nozl. No: ${p.nozzleNo || ''}`));
+          chunks.push(ThermalPrinter.textToUint8('--------------------------------'));
+          chunks.push(ThermalPrinter.textToUint8(`Fuel    : ${p.product || 'Petrol'}`));
+          chunks.push(ThermalPrinter.textToUint8(`Density : ${(p.density ?? 835.7).toFixed(1)} kg/m3`));
+          chunks.push(ThermalPrinter.textToUint8(`Preset  : ${p.preset || 'NON PRESET'}`));
+          chunks.push(ThermalPrinter.textToUint8(`Rate    : Rs.${(p.ratePerLtr || 0).toFixed(2)}`));
+          chunks.push(ThermalPrinter.textToUint8(`Sale    : Rs.${(p.amount || 0).toFixed(2)}`));
+          chunks.push(ThermalPrinter.textToUint8(`Volume  : ${(p.volumeLtr || 0).toFixed(2)} Lts.`));
+        } else {
+          chunks.push(cmds.ALIGN_CENTER);
+          chunks.push(cmds.TEXT_SIZE_LARGE);
+          chunks.push(ThermalPrinter.textToUint8("WELCOME!!!"));
+          chunks.push(ThermalPrinter.textToUint8(`${adjusted.companyName.toUpperCase()}`));
+          chunks.push(cmds.TEXT_SIZE_NORMAL);
+          chunks.push(ThermalPrinter.textToUint8(adjusted.address));
+          chunks.push(ThermalPrinter.textToUint8(`TEL NO: ${p?.telNo}`));
+          chunks.push(ThermalPrinter.textToUint8(`RECEIPT NO: ${p?.receiptNo}`));
+          chunks.push(ThermalPrinter.textToUint8(`FCC ID: ${p?.fccId}`));
+          chunks.push(ThermalPrinter.textToUint8(`FIP NO: ${p?.fipNo}`));
+          chunks.push(ThermalPrinter.textToUint8(`NOZZLE NO: ${p?.nozzleNo}`));
+          chunks.push(cmds.ALIGN_LEFT);
+          chunks.push(cmds.BOLD_ON);
+          chunks.push(cmds.TEXT_SIZE_LARGE);
+          chunks.push(ThermalPrinter.textToUint8(`PRODUCT: ${p?.product}`));
+          chunks.push(ThermalPrinter.textToUint8(`RATE/LTR: ${p?.ratePerLtr.toFixed(2)}`));
+          chunks.push(ThermalPrinter.textToUint8(`AMOUNT: ${p?.amount.toFixed(2)}`));
+          chunks.push(ThermalPrinter.textToUint8(`VOLUME(LTR): ${p?.volumeLtr.toFixed(2)} lt`));
+          chunks.push(cmds.TEXT_SIZE_NORMAL);
+          chunks.push(ThermalPrinter.textToUint8(` `));
+          chunks.push(ThermalPrinter.textToUint8(`VEH TYPE: ${p?.vehType}`));
+          chunks.push(ThermalPrinter.textToUint8(`VEH NO: ${p?.vehicleNumber}`));
+          chunks.push(ThermalPrinter.textToUint8(`CUSTOMER: ${p?.customerName || ''}`));
+          chunks.push(ThermalPrinter.textToUint8(` `));
+          chunks.push(ThermalPrinter.textToUint8(`DATE: ${adjusted.date} ${adjusted.time}`));
+          chunks.push(ThermalPrinter.textToUint8(`MODE: ${adjusted.paymentMode}`));
+          chunks.push(ThermalPrinter.textToUint8(`LST NO: ${p?.lstNo}`));
+          chunks.push(ThermalPrinter.textToUint8(`VAT NO: ${p?.vatNo}`));
+          chunks.push(ThermalPrinter.textToUint8(`ATTENDANT: ${p?.attendantId}`));
+        }
         chunks.push(cmds.BOLD_OFF);
       } else {
         chunks.push(ThermalPrinter.textToUint8(adjusted.companyName.toUpperCase()));
@@ -1048,12 +965,6 @@ export default function App() {
           spread: 70,
           origin: { y: 0.6 }
         });
-      } else {
-        // connect() reports failure by returning false; previously this was
-        // silent, so the user saw nothing when the printer would not connect.
-        setBluetoothConnectionError(newPrinter.lastError || 'Could not connect to the printer. Make sure it is switched on and Bluetooth is enabled.');
-        setIsPrinterConnected(false);
-        setPrinter(null);
       }
     } catch (err: any) {
       console.error(err);
@@ -1139,27 +1050,8 @@ export default function App() {
 
     try {
       if (printer.getPrinterType() === 'catprinter') {
-        const container = document.getElementById('receipt-paper-container');
-        if (!container) {
-          throw new Error("Receipt preview element not found.");
-        }
-        
-        const originalStyle = container.style.boxShadow;
-        container.style.boxShadow = 'none';
-        
-        await waitForImagesToLoad(container);
-        const restoreLogos = await fitLogosToBoxes(container);
-        const canvas = await html2canvas(container, {
-          scale: 2,
-          useCORS: true,
-          logging: false,
-          backgroundColor: '#FFFFFF'
-        });
-        
-        container.style.boxShadow = originalStyle;
-        restoreLogos();
-        
-        const bytes = ThermalPrinter.canvasToCatPrinter(canvas);
+        const canvas = await captureReceiptCanvas(data, 2);
+        const bytes = ThermalPrinter.canvasToCatPrinter(canvas, printer.getCatPrinterEnergy());
         await printer.print(bytes);
         saveToHistory();
         
@@ -1178,41 +1070,64 @@ export default function App() {
       chunks.push(cmds.ALIGN_CENTER);
       chunks.push(cmds.BOLD_ON);
 
-      if (data.type === 'PETROL' && data.petrolFormat === 'STATION') {
-        chunks.push(...buildStationEscPos(data));
-      } else if (data.type === 'PETROL') {
+      if (data.type === 'PETROL') {
+        const p = data.petrolDetails;
         chunks.push(cmds.BOLD_ON);
-        chunks.push(cmds.TEXT_SIZE_LARGE);
-        chunks.push(ThermalPrinter.textToUint8("WELCOME!!!"));
-        chunks.push(ThermalPrinter.textToUint8(`${data.companyName.toUpperCase()}`));
-        chunks.push(cmds.TEXT_SIZE_NORMAL);
-        chunks.push(ThermalPrinter.textToUint8(data.address));
-        chunks.push(ThermalPrinter.textToUint8(`TEL NO: ${data.petrolDetails?.telNo}`));
-        chunks.push(ThermalPrinter.textToUint8(`RECEIPT NO: ${data.petrolDetails?.receiptNo}`));
-        chunks.push(ThermalPrinter.textToUint8(`FCC ID: ${data.petrolDetails?.fccId}`));
-        chunks.push(ThermalPrinter.textToUint8(`FIP NO: ${data.petrolDetails?.fipNo}`));
-        chunks.push(ThermalPrinter.textToUint8(`NOZZLE NO: ${data.petrolDetails?.nozzleNo}`));
-        
-        chunks.push(cmds.ALIGN_LEFT);
-        chunks.push(cmds.BOLD_ON);
-        chunks.push(cmds.TEXT_SIZE_LARGE);
-        chunks.push(ThermalPrinter.textToUint8(`PRODUCT: ${data.petrolDetails?.product}`));
-        chunks.push(ThermalPrinter.textToUint8(`RATE/LTR: ${data.petrolDetails?.ratePerLtr.toFixed(2)}`));
-        chunks.push(ThermalPrinter.textToUint8(`AMOUNT: ${data.petrolDetails?.amount.toFixed(2)}`));
-        chunks.push(ThermalPrinter.textToUint8(`VOLUME(LTR): ${data.petrolDetails?.volumeLtr.toFixed(2)} lt`));
-        chunks.push(cmds.TEXT_SIZE_NORMAL);
-        chunks.push(ThermalPrinter.textToUint8(` `));
-        chunks.push(ThermalPrinter.textToUint8(`VEH TYPE: ${data.petrolDetails?.vehType}`));
-        chunks.push(ThermalPrinter.textToUint8(`VEH NO: ${data.petrolDetails?.vehicleNumber}`));
-        chunks.push(ThermalPrinter.textToUint8(`CUSTOMER: ${data.petrolDetails?.customerName || ''}`));
-        chunks.push(ThermalPrinter.textToUint8(` `));
-        chunks.push(ThermalPrinter.textToUint8(`DATE: ${data.date} ${data.time}`));
-        chunks.push(ThermalPrinter.textToUint8(`MODE: ${data.paymentMode}`));
-        chunks.push(ThermalPrinter.textToUint8(`LST NO: ${data.petrolDetails?.lstNo}`));
-        chunks.push(ThermalPrinter.textToUint8(`VAT NO: ${data.petrolDetails?.vatNo}`));
-        chunks.push(ThermalPrinter.textToUint8(`ATTENDANT: ${data.petrolDetails?.attendantId}`));
+        if (p?.format === 'NEW_HP') {
+          chunks.push(cmds.ALIGN_CENTER);
+          chunks.push(cmds.TEXT_SIZE_NORMAL);
+          chunks.push(ThermalPrinter.textToUint8(data.companyName.toUpperCase()));
+          chunks.push(ThermalPrinter.textToUint8(`DEALERS:- ${p?.dealerName || 'HPCL'}`));
+          chunks.push(ThermalPrinter.textToUint8(data.address));
+          chunks.push(cmds.ALIGN_LEFT);
+          chunks.push(ThermalPrinter.textToUint8('--------------------------------'));
+          chunks.push(ThermalPrinter.textToUint8(`B1TT NO: ${data.billNumber || p.receiptNo || ''}`));
+          chunks.push(ThermalPrinter.textToUint8(`Trns. ID: ${p.transactionId || ''}`));
+          chunks.push(ThermalPrinter.textToUint8(`Atnd. ID: ${p.attendantId || ''}`));
+          chunks.push(ThermalPrinter.textToUint8(`Vehi. No: ${p.vehicleNumber || ''}`));
+          chunks.push(ThermalPrinter.textToUint8(`Date    : ${data.date}`));
+          chunks.push(ThermalPrinter.textToUint8(`Time    : ${data.time}`));
+          chunks.push(ThermalPrinter.textToUint8(`FP. ID  : ${p.fipNo || ''}`));
+          chunks.push(ThermalPrinter.textToUint8(`Nozl. No: ${p.nozzleNo || ''}`));
+          chunks.push(ThermalPrinter.textToUint8('--------------------------------'));
+          chunks.push(ThermalPrinter.textToUint8(`Fuel    : ${p.product || 'Petrol'}`));
+          chunks.push(ThermalPrinter.textToUint8(`Density : ${(p.density ?? 835.7).toFixed(1)} kg/m3`));
+          chunks.push(ThermalPrinter.textToUint8(`Preset  : ${p.preset || 'NON PRESET'}`));
+          chunks.push(ThermalPrinter.textToUint8(`Rate    : Rs.${(p.ratePerLtr || 0).toFixed(2)}`));
+          chunks.push(ThermalPrinter.textToUint8(`Sale    : Rs.${(p.amount || 0).toFixed(2)}`));
+          chunks.push(ThermalPrinter.textToUint8(`Volume  : ${(p.volumeLtr || 0).toFixed(2)} Lts.`));
+        } else {
+          chunks.push(cmds.ALIGN_CENTER);
+          chunks.push(cmds.TEXT_SIZE_LARGE);
+          chunks.push(ThermalPrinter.textToUint8("WELCOME!!!"));
+          chunks.push(ThermalPrinter.textToUint8(`${data.companyName.toUpperCase()}`));
+          chunks.push(cmds.TEXT_SIZE_NORMAL);
+          chunks.push(ThermalPrinter.textToUint8(data.address));
+          chunks.push(ThermalPrinter.textToUint8(`TEL NO: ${p?.telNo}`));
+          chunks.push(ThermalPrinter.textToUint8(`RECEIPT NO: ${p?.receiptNo}`));
+          chunks.push(ThermalPrinter.textToUint8(`FCC ID: ${p?.fccId}`));
+          chunks.push(ThermalPrinter.textToUint8(`FIP NO: ${p?.fipNo}`));
+          chunks.push(ThermalPrinter.textToUint8(`NOZZLE NO: ${p?.nozzleNo}`));
+          chunks.push(cmds.ALIGN_LEFT);
+          chunks.push(cmds.BOLD_ON);
+          chunks.push(cmds.TEXT_SIZE_LARGE);
+          chunks.push(ThermalPrinter.textToUint8(`PRODUCT: ${p?.product}`));
+          chunks.push(ThermalPrinter.textToUint8(`RATE/LTR: ${p?.ratePerLtr.toFixed(2)}`));
+          chunks.push(ThermalPrinter.textToUint8(`AMOUNT: ${p?.amount.toFixed(2)}`));
+          chunks.push(ThermalPrinter.textToUint8(`VOLUME(LTR): ${p?.volumeLtr.toFixed(2)} lt`));
+          chunks.push(cmds.TEXT_SIZE_NORMAL);
+          chunks.push(ThermalPrinter.textToUint8(` `));
+          chunks.push(ThermalPrinter.textToUint8(`VEH TYPE: ${p?.vehType}`));
+          chunks.push(ThermalPrinter.textToUint8(`VEH NO: ${p?.vehicleNumber}`));
+          chunks.push(ThermalPrinter.textToUint8(`CUSTOMER: ${p?.customerName || ''}`));
+          chunks.push(ThermalPrinter.textToUint8(` `));
+          chunks.push(ThermalPrinter.textToUint8(`DATE: ${data.date} ${data.time}`));
+          chunks.push(ThermalPrinter.textToUint8(`MODE: ${data.paymentMode}`));
+          chunks.push(ThermalPrinter.textToUint8(`LST NO: ${p?.lstNo}`));
+          chunks.push(ThermalPrinter.textToUint8(`VAT NO: ${p?.vatNo}`));
+          chunks.push(ThermalPrinter.textToUint8(`ATTENDANT: ${p?.attendantId}`));
+        }
         chunks.push(cmds.BOLD_OFF);
-
       } else {
         chunks.push(ThermalPrinter.textToUint8(data.companyName.toUpperCase()));
         chunks.push(cmds.BOLD_OFF);
@@ -1279,23 +1194,6 @@ export default function App() {
       alert("Printing failed. See console for details.");
     }
   };
-
-  const renderPetrolLogo = () => (
-    <div className="w-44 h-36 flex items-center justify-center">
-      {data.petrolDetails?.company === 'CUSTOM' ? (
-        data.petrolDetails?.customLogoUrl ? (
-          <img
-            src={data.petrolDetails.customLogoUrl}
-            alt="Custom Station Logo"
-            className="max-w-[176px] max-h-[144px] object-contain select-none"
-            referrerPolicy="no-referrer"
-          />
-        ) : null
-      ) : (
-        PETROL_LOGOS[data.petrolDetails?.company || 'JIO_BP']
-      )}
-    </div>
-  );
 
   if (isSecurityEnabled && !isAuthenticated) {
     return (
@@ -1669,22 +1567,18 @@ export default function App() {
                 )}
                  {activeTab === 'PETROL' && (
                   <div className="space-y-4">
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 block">Bill Format</label>
-                    <div className="grid grid-cols-2 gap-2">
-                      {([['CLASSIC', 'Classic Slip'], ['STATION', 'Station Slip']] as const).map(([fmt, label]) => (
-                        <button
-                          key={fmt}
-                          type="button"
-                          onClick={() => setData(prev => ({ ...prev, petrolFormat: fmt }))}
-                          className={`py-2 rounded-xl text-xs font-black uppercase tracking-wider border cursor-pointer transition-all ${
-                            (data.petrolFormat || 'CLASSIC') === fmt
-                              ? 'bg-emerald-500 text-slate-950 border-emerald-500'
-                              : 'bg-slate-50 text-slate-500 border-slate-100 hover:bg-slate-100'
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      ))}
+                    <div className="p-3.5 bg-emerald-50/70 border border-emerald-100 rounded-2xl">
+                      <div className="flex items-center justify-between gap-3 mb-2">
+                        <div>
+                          <label className="text-xs font-black text-slate-700 uppercase tracking-widest block">Petrol Bill Format</label>
+                          <p className="text-[10px] text-slate-500 mt-0.5">Choose the old receipt or the new HP-style service-station receipt.</p>
+                        </div>
+                        <span className="text-[9px] font-black uppercase tracking-wider text-emerald-700 bg-white px-2 py-1 rounded-lg border border-emerald-100">{data.petrolDetails?.format === 'NEW_HP' ? 'NEW' : 'OLD'}</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 p-1 bg-white rounded-xl border border-emerald-100">
+                        <button type="button" onClick={() => setData(prev => ({ ...prev, petrolDetails: { ...prev.petrolDetails!, format: 'OLD' } }))} className={`py-2.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all ${data.petrolDetails?.format !== 'NEW_HP' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}>Old Format</button>
+                        <button type="button" onClick={() => setData(prev => ({ ...prev, petrolDetails: { ...prev.petrolDetails!, format: 'NEW_HP' } }))} className={`py-2.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all ${data.petrolDetails?.format === 'NEW_HP' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}>New HP Format</button>
+                      </div>
                     </div>
 
                     <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 block">Petrol Company</label>
@@ -1745,7 +1639,31 @@ export default function App() {
                       })}
                     </div>
 
-                    {data.petrolDetails?.company === 'CUSTOM' && (
+                    {data.petrolDetails?.format === 'NEW_HP' && (
+                      <div className="space-y-3 p-3 bg-slate-50 rounded-2xl border border-slate-200">
+                        <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">New Format Fields</div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 block">Transaction ID</label>
+                            <input type="text" value={data.petrolDetails?.transactionId || ''} onChange={(e) => setData(prev => ({ ...prev, petrolDetails: { ...prev.petrolDetails!, transactionId: e.target.value } }))} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 text-xs" placeholder="TRNS. ID" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 block">Dealer Name</label>
+                            <input type="text" value={data.petrolDetails?.dealerName || ''} onChange={(e) => setData(prev => ({ ...prev, petrolDetails: { ...prev.petrolDetails!, dealerName: e.target.value } }))} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 text-xs" placeholder="HPCL" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 block">Density</label>
+                            <input type="number" step="0.1" value={data.petrolDetails?.density ?? 835.7} onChange={(e) => setData(prev => ({ ...prev, petrolDetails: { ...prev.petrolDetails!, density: parseFloat(e.target.value) || 0 } }))} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 text-xs" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 block">Preset</label>
+                            <input type="text" value={data.petrolDetails?.preset || 'NON PRESET'} onChange={(e) => setData(prev => ({ ...prev, petrolDetails: { ...prev.petrolDetails!, preset: e.target.value } }))} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 text-xs" />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {(data.petrolDetails?.company === 'CUSTOM' || data.petrolDetails?.format === 'NEW_HP') && (
                       <div className="p-3.5 bg-slate-50 rounded-xl border border-dashed border-slate-200 mt-2">
                         <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">Upload Custom SVG / Logo Image</label>
                         <div className="flex items-center gap-3">
@@ -1899,31 +1817,6 @@ export default function App() {
                          />
                        </div>
                     </div>
-
-                    {data.petrolFormat === 'STATION' && (
-                      <div className="grid grid-cols-2 gap-3 p-3 rounded-2xl bg-emerald-50/60 border border-emerald-100">
-                        <div className="col-span-2">
-                          <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 block">Dealer Line</label>
-                          <input type="text" placeholder="DEALERS:-HPCL" value={data.petrolDetails?.dealerLine || ''} onChange={(e) => setData({...data, petrolDetails: {...data.petrolDetails!, dealerLine: e.target.value}})} className="w-full px-4 py-2 bg-white border-none rounded-xl focus:ring-2 focus:ring-emerald-500 text-xs" />
-                        </div>
-                      <div>
-                        <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 block">Trns.ID</label>
-                        <input type="text" placeholder="" value={data.petrolDetails?.transactionId || ''} onChange={(e) => setData({...data, petrolDetails: {...data.petrolDetails!, transactionId: e.target.value}})} className="w-full px-4 py-2 bg-white border-none rounded-xl focus:ring-2 focus:ring-emerald-500 text-xs" />
-                      </div>
-                      <div>
-                        <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 block">FP ID</label>
-                        <input type="text" placeholder="1" value={data.petrolDetails?.fpId || ''} onChange={(e) => setData({...data, petrolDetails: {...data.petrolDetails!, fpId: e.target.value}})} className="w-full px-4 py-2 bg-white border-none rounded-xl focus:ring-2 focus:ring-emerald-500 text-xs" />
-                      </div>
-                      <div>
-                        <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 block">Density</label>
-                        <input type="text" placeholder="835.7kg/m3" value={data.petrolDetails?.density || ''} onChange={(e) => setData({...data, petrolDetails: {...data.petrolDetails!, density: e.target.value}})} className="w-full px-4 py-2 bg-white border-none rounded-xl focus:ring-2 focus:ring-emerald-500 text-xs" />
-                      </div>
-                      <div>
-                        <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 block">Preset</label>
-                        <input type="text" placeholder="NON PRESET" value={data.petrolDetails?.preset || ''} onChange={(e) => setData({...data, petrolDetails: {...data.petrolDetails!, preset: e.target.value}})} className="w-full px-4 py-2 bg-white border-none rounded-xl focus:ring-2 focus:ring-emerald-500 text-xs" />
-                      </div>
-                      </div>
-                    )}
 
                     <div className="grid grid-cols-4 gap-2">
                        <div>
@@ -2358,29 +2251,53 @@ export default function App() {
                
               {/* Receipt Content -> Strictly 2 inches width emulation */}
               <div id="receipt-paper-container" className="receipt-paper font-mono text-[11px] leading-tight text-slate-800 antialiased mx-auto flex flex-col items-center bg-white px-4 py-6 w-[288px]">
-                {activeTab === 'PETROL' && data.petrolFormat === 'STATION' ? (
-                  <div className="w-full font-black text-black petrol-dense text-[13px] leading-tight">
-                    <div className="flex flex-col items-center mb-3 mt-2 w-full">
-                      {renderPetrolLogo()}
-                    </div>
-                    <div className="uppercase text-[14px] leading-snug break-words mb-4 tracking-wide">
-                      <div>{data.companyName}</div>
-                      {data.petrolDetails?.dealerLine && <div>{data.petrolDetails.dealerLine}</div>}
-                      <div>{data.address}</div>
-                    </div>
-                    <div className="space-y-2.5">
-                      {getStationRows(data).map(([label, value]) => (
-                        <div key={label} className="flex items-baseline">
-                          <span className="w-[92px] shrink-0 whitespace-nowrap">{label}</span>
-                          <span className="w-[12px] shrink-0">:</span>
-                          <span className="flex-1 min-w-0 pl-1 break-words">{value}</span>
+                {activeTab === 'PETROL' ? (
+                  <div className="w-full font-black text-[12px] leading-tight">
+                    {data.petrolDetails?.format === 'NEW_HP' ? (
+                      <div className="w-full font-black text-[11px] leading-tight text-slate-900">
+                        <div className="flex flex-col items-center mb-3 mt-1 w-full">
+                          <div className="w-28 h-28 flex items-center justify-center">
+                            {data.petrolDetails?.customLogoUrl ? (
+                              <img src={data.petrolDetails.customLogoUrl} alt="Station Logo" className="max-w-[112px] max-h-[112px] object-contain" referrerPolicy="no-referrer" />
+                            ) : (
+                              PETROL_LOGOS[data.petrolDetails?.company || 'HP']
+                            )}
+                          </div>
                         </div>
-                      ))}
-                    </div>
-                    <div className="text-center mt-6 mb-3 text-[12px] uppercase">Thank You! Visit Again</div>
-                  </div>
-                ) : activeTab === 'PETROL' ? (
-                  <div className="w-full font-black text-black petrol-dense text-[13px] leading-tight">
+                        <div className="text-center font-black text-[13px] uppercase leading-tight">{data.companyName}</div>
+                        <div className="text-center font-black text-[10px] uppercase mt-1">DEALERS:- {data.petrolDetails?.dealerName || 'HPCL'}</div>
+                        <div className="text-center font-black text-[10px] mt-1 leading-tight">{data.address}</div>
+                        <div className="mt-3 mb-3 border-y-2 border-slate-900 py-2 space-y-1.5">
+                          {[
+                            ['B1TT NO:', data.billNumber || data.petrolDetails?.receiptNo || ''],
+                            ['Trns. ID:', data.petrolDetails?.transactionId || ''],
+                            ['Atnd. ID:', data.petrolDetails?.attendantId || ''],
+                            ['Vehi. No:', data.petrolDetails?.vehicleNumber || ''],
+                            ['Date', data.date || ''],
+                            ['Time', data.time || ''],
+                            ['FP. ID', data.petrolDetails?.fipNo || ''],
+                            ['Nozl. No:', data.petrolDetails?.nozzleNo || ''],
+                          ].map(([label, value]) => (
+                            <div key={label} className="grid grid-cols-[45%_55%] gap-x-2 items-baseline">
+                              <span>{label}</span><span className="text-right break-words">{value}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="space-y-1.5 text-[12px]">
+                          <div className="grid grid-cols-[45%_55%] gap-x-2"><span>Fuel</span><span className="text-right">{data.petrolDetails?.product || 'Petrol'}</span></div>
+                          <div className="grid grid-cols-[45%_55%] gap-x-2"><span>Density</span><span className="text-right">{(data.petrolDetails?.density ?? 835.7).toFixed(1)} kg/m3</span></div>
+                          <div className="grid grid-cols-[45%_55%] gap-x-2"><span>Preset</span><span className="text-right">{data.petrolDetails?.preset || 'NON PRESET'}</span></div>
+                          <div className="grid grid-cols-[45%_55%] gap-x-2 font-black"><span>Rate</span><span className="text-right">Rs.{data.petrolDetails?.ratePerLtr.toFixed(2)}</span></div>
+                          <div className="grid grid-cols-[45%_55%] gap-x-2 font-black"><span>Sale</span><span className="text-right">Rs.{data.petrolDetails?.amount.toFixed(2)}</span></div>
+                          <div className="grid grid-cols-[45%_55%] gap-x-2 font-black"><span>Volume</span><span className="text-right">{data.petrolDetails?.volumeLtr.toFixed(2)} Lts.</span></div>
+                        </div>
+                        <div className="mt-5 pt-2 border-t border-dashed border-slate-400 text-center">
+                          <div className="font-black text-[10px] uppercase">Thank You! Visit Again</div>
+                          <div className="text-[8px] mt-1 font-bold">SAVE FUEL, SAVE MONEY, SAVE THE PLANET.</div>
+                        </div>
+                      </div>
+                    ) : (
+                    <>
                     <div className="flex flex-col items-center mb-5 mt-3 min-h-[145px] justify-center w-full">
                       <div className="w-44 h-44 flex items-center justify-center">
                         {data.petrolDetails?.company === 'CUSTOM' ? (
@@ -2405,12 +2322,12 @@ export default function App() {
                       </div>
                     </div>
                     
-                    <div className="text-center font-black text-[15px] mb-2">WELCOME!!!</div>
+                    <div className="text-center font-black text-[14px] mb-2">WELCOME!!!</div>
                     
-                    <div className="text-center text-[14px] mb-4 leading-tight font-black">{data.companyName.toUpperCase()}</div>
-                    <div className="text-center text-[12px] mb-4 leading-tight font-bold">{data.address}</div>
+                    <div className="text-center text-[13px] mb-4 leading-tight font-black">{data.companyName.toUpperCase()}</div>
+                    <div className="text-center text-[11px] mb-4 leading-tight font-bold">{data.address}</div>
                     
-                    <div className="text-[12px] space-y-2.5 mb-5 font-black">
+                    <div className="text-[11px] space-y-2 mb-5 font-black">
                       <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline"><span>TEL NO:</span> <span className="text-right break-words">{data.petrolDetails?.telNo}</span></div>
                       <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline"><span>RECEIPT NO:</span> <span className="text-right break-words">{data.petrolDetails?.receiptNo}</span></div>
                       <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline"><span>FCC ID:</span> <span className="text-right break-words">{data.petrolDetails?.fccId || 'N/A'}</span></div>
@@ -2418,20 +2335,20 @@ export default function App() {
                       <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline"><span>NOZZLE NO:</span> <span className="text-right break-words">{data.petrolDetails?.nozzleNo || 'N/A'}</span></div>
                     </div>
 
-                    <div className="text-[13px] space-y-3 mt-3 mb-5 py-4 border-y border-dashed border-slate-300 font-black">
+                    <div className="text-[12px] space-y-2.5 mt-3 mb-5 py-4 border-y border-dashed border-slate-300 font-black">
                       <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline uppercase"><span>PRODUCT:</span> <span className="text-right break-words">{data.petrolDetails?.product}</span></div>
                       <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline uppercase"><span>RATE/LTR:</span> <span className="text-right break-words">{data.petrolDetails?.ratePerLtr.toFixed(2)}</span></div>
                       <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline uppercase"><span>AMOUNT:</span> <span className="text-right break-words">₹{data.petrolDetails?.amount.toFixed(2)}</span></div>
                       <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline uppercase"><span>VOLUME(LTR):</span> <span className="text-right break-words">{data.petrolDetails?.volumeLtr.toFixed(2)} lt</span></div>
                     </div>
 
-                    <div className="text-[12px] space-y-2.5 mb-5 font-black">
+                    <div className="text-[11px] space-y-2 mb-5 font-black">
                       <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline uppercase"><span>VEH TYPE:</span> <span className="text-right break-words">{data.petrolDetails?.vehType}</span></div>
                       <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline uppercase"><span>VEH NO:</span> <span className="text-right break-words">{data.petrolDetails?.vehicleNumber}</span></div>
                       <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline uppercase"><span>CUSTOMER:</span> <span className="max-w-[120px] text-right">{data.petrolDetails?.customerName || ''}</span></div>
                     </div>
 
-                    <div className="text-[12px] space-y-2 pt-2 font-black">
+                    <div className="text-[11px] space-y-2 pt-2 font-black">
                       <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline uppercase"><span>DATE:</span> <span className="text-right break-words">{data.date} {data.time}</span></div>
                       <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline uppercase"><span>MODE:</span> <span className="text-right break-words">{data.paymentMode}</span></div>
                       <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline uppercase"><span>VAT NO:</span> <span className="text-right break-words">{data.petrolDetails?.vatNo || 'N/A'}</span></div>
@@ -2440,15 +2357,17 @@ export default function App() {
 
                     <div className="flex flex-col items-center mt-12 mb-4">
                       <div className="mb-2 tracking-widest text-slate-300">******************</div>
-                      <div className="font-black text-[14px] uppercase">Thank You! Visit Again</div>
+                      <div className="font-black text-[13px] uppercase">Thank You! Visit Again</div>
                       <div className="text-[9px] mt-1 font-bold">SAVE FUEL, SAVE MONEY, SAVE THE PLANET.</div>
                     </div>
+                    </>
+                    )}
                   </div>
                 ) : (
                   <>
                     {/* Logo Area */}
                     {data.type === 'RESTAURANT' && data.restaurantLogo !== 'NONE' && (
-                      <div className="mb-4 w-[52px] h-[52px] min-w-[52px] min-h-[52px] shrink-0 box-border border-2 border-slate-900 rounded-full flex items-center justify-center overflow-hidden leading-none">
+                      <div className="mb-4 border-2 border-slate-900 rounded-full p-2 flex items-center justify-center">
                         {(!data.restaurantLogo || data.restaurantLogo === 'UTENSILS') && <Utensils className="w-6 h-6 text-slate-900" />}
                         {data.restaurantLogo === 'COFFEE' && <Coffee className="w-6 h-6 text-slate-900" />}
                         {data.restaurantLogo === 'PIZZA' && <Pizza className="w-6 h-6 text-slate-900" />}
@@ -2456,7 +2375,7 @@ export default function App() {
                         {data.restaurantLogo === 'BAR' && <Wine className="w-6 h-6 text-slate-900" />}
                         {data.restaurantLogo === 'CUSTOM' && (
                           data.restaurantCustomLogoUrl ? (
-                            <img src={data.restaurantCustomLogoUrl} width={32} height={32} data-fit-box="32x32" className="block w-8 h-8 min-w-[32px] min-h-[32px] max-w-none object-contain shrink-0" referrerPolicy="no-referrer" alt="Custom Logo" />
+                            <img src={data.restaurantCustomLogoUrl} className="w-8 h-8 object-contain" referrerPolicy="no-referrer" alt="Custom Logo" />
                           ) : (
                             <Utensils className="w-6 h-6 text-slate-900" />
                           )
@@ -2466,10 +2385,8 @@ export default function App() {
 
                     <h1 className={`text-center font-black mb-1 leading-none uppercase ${data.type === 'RESTAURANT' ? 'text-[15px] tracking-tight' : 'text-base'}`}>{data.companyName}</h1>
                     <p className="text-center text-[10px] whitespace-normal mb-2 max-w-[210px]">{data.address}</p>
-                    {data.type === 'RESTAURANT' ? (
+                    {data.type === 'RESTAURANT' && (
                       <div className="text-center text-[8px] font-black tracking-[0.22em] uppercase mb-2">DINING • ORDER RECEIPT</div>
-                    ) : (
-                      <div className="text-center text-[8px] font-black tracking-[0.22em] uppercase mb-2">RETAIL • TAX INVOICE</div>
                     )}
                     <div className="w-full h-[1px] border-b border-dashed border-slate-300 my-2"></div>
                     
@@ -2537,17 +2454,7 @@ export default function App() {
                       </div>
                     )}
 
-                    {data.type === 'RESTAURANT' ? (
-                      <>
-                        <p className="text-center font-black mt-4 uppercase tracking-wider">★ Thank you for dining ★</p>
-                        <p className="text-center text-[9px] mt-0.5">We hope to serve you again</p>
-                      </>
-                    ) : (
-                      <>
-                        <p className="text-center font-bold mt-4 uppercase">Thank You! Visit Again</p>
-                        <p className="text-center text-[8px] mt-1">Goods once sold will not be taken back</p>
-                      </>
-                    )}
+                    <p className="text-center font-bold mt-4 uppercase">Thank You! Visit Again</p>
                   </>
                 )}
                 <div className="mt-8 opacity-20 transform scale-y-50">----------------------------</div>
@@ -2647,21 +2554,7 @@ export default function App() {
                 {/* Emulated 2-inch Thermal Receipt */}
                 <div className="bg-white text-slate-900 p-4 rounded-xl shadow-2xl scale-[0.92] sm:scale-100 origin-top">
                   <div className="receipt-paper font-mono text-[11px] leading-tight text-slate-800 antialiased mx-auto flex flex-col items-center bg-white px-3 py-4 w-[288px]">
-                    {activeTab === 'PETROL' && data.petrolFormat === 'STATION' ? (
-                      <div className="w-full font-black text-left text-xs">
-                        <p className="font-black text-sm mb-1 uppercase">{data.companyName || 'PETROL PUMP'}</p>
-                        <p className="text-[10px] mb-3 uppercase">{data.address}</p>
-                        <div className="space-y-1 text-[11px]">
-                          {getStationRows(data).map(([label, value]) => (
-                            <div key={label} className="flex items-baseline">
-                              <span className="w-[72px] shrink-0">{label}</span>
-                              <span className="w-[10px] shrink-0">:</span>
-                              <span className="flex-1 min-w-0 break-words">{value}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : activeTab === 'PETROL' ? (
+                    {activeTab === 'PETROL' ? (
                       <div className="w-full font-black text-center text-xs">
                         <p className="font-bold text-sm mb-1">{data.companyName || 'PETROL PUMP'}</p>
                         <p className="text-[10px] text-slate-600 mb-3">{data.address}</p>
@@ -3461,11 +3354,6 @@ export default function App() {
           font-size: ${data.fontSize === 'small' ? '9px' : data.fontSize === 'medium' ? '11px' : '13px'};
           font-weight: ${activeTab === 'PETROL' || data.fontStyle === 'bold' ? '700' : '400'};
           letter-spacing: ${data.fontStyle === 'condensed' ? '-0.5px' : 'normal'};
-        }
-        /* Thicker, denser glyphs for petrol slips (Courier Prime has no weight above 700) */
-        .petrol-dense, .petrol-dense * {
-          color: #000 !important;
-          text-shadow: 0.45px 0 0 #000;
         }
         .cursor-edit {
           border-bottom: 1px dashed transparent;

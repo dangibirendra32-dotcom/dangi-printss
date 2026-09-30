@@ -1,7 +1,5 @@
 export type BillType = 'MART' | 'RESTAURANT' | 'PETROL';
 
-export type PetrolFormat = 'CLASSIC' | 'STATION';
-
 export type PetrolCompany = 'JIO_BP' | 'HP' | 'BHARAT_PETROLEUM' | 'INDIAN_OIL' | 'NAYARA' | 'ESSAR' | 'CUSTOM';
 
 export interface ReceiptItem {
@@ -30,6 +28,13 @@ export interface ReceiptData {
   paymentMode: string;
   petrolDetails?: {
     company: PetrolCompany;
+    /** Petrol receipt layout: legacy app format or HP-style service-station format. */
+    format?: 'OLD' | 'NEW_HP';
+    transactionId?: string;
+    /** Optional editable dealer/agency line used by the NEW_HP layout. */
+    dealerName?: string;
+    density?: number;
+    preset?: string;
     customLogoUrl?: string;
     telNo: string;
     receiptNo: string;
@@ -46,14 +51,7 @@ export interface ReceiptData {
     lstNo: string;
     vatNo: string;
     attendantId: string;
-    // Extra fields used only by the 'STATION' bill format
-    dealerLine?: string;
-    transactionId?: string;
-    fpId?: string;
-    density?: string;
-    preset?: string;
   };
-  petrolFormat?: PetrolFormat;
   qrValue?: string;
   fontSize: 'small' | 'medium' | 'large';
   fontStyle: 'normal' | 'condensed' | 'bold';
