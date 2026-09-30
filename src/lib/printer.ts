@@ -35,6 +35,7 @@ export class ThermalPrinter {
   private nativeServiceUuid: string | null = null;
   private nativeCharUuid: string | null = null;
   private nativeWriteWithoutResponse = false;
+  private nativeMtu: number | null = null;
 
   private printerType: PrinterType = 'escpos';
   
@@ -68,6 +69,11 @@ export class ThermalPrinter {
     '0000180a-0000-1000-8000-00805f9b34fb',
   ];
 
+  private static isCatPrinterService(uuid: string): boolean {
+    const u = uuid.toLowerCase();
+    return CAT_PRINTER_SERVICE_UUIDS.some(catUuid => catUuid.toLowerCase() === u);
+  }
+
   // Method to set energy level for cat printers
   setCatPrinterEnergy(energy: number) {
     // Validate energy level
@@ -96,6 +102,7 @@ export class ThermalPrinter {
         this.nativeDeviceId = null;
         this.nativeServiceUuid = null;
         this.nativeCharUuid = null;
+        this.nativeMtu = null;
       }
     } else {
       if (this.device) {
@@ -138,16 +145,27 @@ export class ThermalPrinter {
         this.nativeDeviceId = null;
         this.nativeServiceUuid = null;
         this.nativeCharUuid = null;
+        this.nativeMtu = null;
       });
 
       const services = await BleClient.getServices(device.deviceId);
       this.availableServices = services.map(s => s.uuid);
+
+      try {
+        this.nativeMtu = await BleClient.getMtu(device.deviceId);
+        console.log(`BLE MTU: ${this.nativeMtu}, max write payload: ${Math.max(20, this.nativeMtu - 3)} bytes`);
+      } catch {
+        this.nativeMtu = null;
+      }
 
       this.printerType = 'escpos';
       let matchedService: (typeof services)[number] | undefined;
 
       if (customServiceUuid) {
         matchedService = services.find(s => s.uuid.toLowerCase() === customServiceUuid.toLowerCase());
+        if (matchedService && ThermalPrinter.isCatPrinterService(matchedService.uuid)) {
+          this.printerType = 'catprinter';
+        }
       }
 
       if (!matchedService) {
@@ -250,6 +268,9 @@ export class ThermalPrinter {
       if (customServiceUuid) {
         try {
           service = await server.getPrimaryService(customServiceUuid);
+          if (service && ThermalPrinter.isCatPrinterService(service.uuid)) {
+            this.printerType = 'catprinter';
+          }
         } catch (e) {
           // Fallback
         }
@@ -347,6 +368,7 @@ export class ThermalPrinter {
       if (!service) throw new Error(`Service ${serviceUuid} not found`);
       this.nativeServiceUuid = service.uuid;
       this.connectedServiceUuid = service.uuid;
+      this.printerType = ThermalPrinter.isCatPrinterService(service.uuid) ? 'catprinter' : 'escpos';
       this.availableCharacteristics = service.characteristics.map(c => ({
         uuid: c.uuid,
         properties: {
@@ -354,7 +376,9 @@ export class ThermalPrinter {
           writeWithoutResponse: !!c?.properties?.writeWithoutResponse,
         },
       }));
-      const char = service.characteristics.find(c => c?.properties?.write || c?.properties?.writeWithoutResponse) || service.characteristics[0];
+      const char = this.printerType === 'catprinter'
+        ? (service.characteristics.find(c => c?.uuid?.toLowerCase() === CAT_PRINTER_TX_CHARACTERISTIC_UUID.toLowerCase()) || service.characteristics.find(c => c?.properties?.write || c?.properties?.writeWithoutResponse) || service.characteristics[0])
+        : (service.characteristics.find(c => c?.properties?.write || c?.properties?.writeWithoutResponse) || service.characteristics[0]);
       if (char) {
         this.nativeCharUuid = char.uuid;
         this.nativeWriteWithoutResponse = !!char.properties?.writeWithoutResponse;
@@ -365,6 +389,7 @@ export class ThermalPrinter {
       const service = await this.device.gatt.getPrimaryService(serviceUuid);
       const characteristics = await service.getCharacteristics();
       this.connectedServiceUuid = service.uuid;
+      this.printerType = ThermalPrinter.isCatPrinterService(service.uuid) ? 'catprinter' : 'escpos';
       this.availableCharacteristics = characteristics ? characteristics.map(c => ({
         uuid: c.uuid,
         properties: {
@@ -372,7 +397,9 @@ export class ThermalPrinter {
           writeWithoutResponse: !!c?.properties?.writeWithoutResponse,
         },
       })) : [];
-      const char = characteristics?.find(c => c?.properties?.write || c?.properties?.writeWithoutResponse) || characteristics?.[0];
+      const char = this.printerType === 'catprinter'
+        ? (characteristics?.find(c => c?.uuid?.toLowerCase() === CAT_PRINTER_TX_CHARACTERISTIC_UUID.toLowerCase()) || characteristics?.find(c => c?.properties?.write || c?.properties?.writeWithoutResponse) || characteristics?.[0])
+        : (characteristics?.find(c => c?.properties?.write || c?.properties?.writeWithoutResponse) || characteristics?.[0]);
       if (char) {
         this.characteristic = char;
         this.connectedCharacteristicUuid = char.uuid;
@@ -422,7 +449,9 @@ export class ThermalPrinter {
       console.log(`Printing with energy: ${this.catPrinterEnergy.toString(16)}`);
     }
 
-    const chunkSize = this.chunkSize || 128;
+    const configuredChunkSize = this.chunkSize || 128;
+    const mtuLimitedChunkSize = this.nativeMtu && this.nativeMtu > 3 ? Math.max(20, this.nativeMtu - 3) : configuredChunkSize;
+    const chunkSize = isNative ? Math.min(configuredChunkSize, mtuLimitedChunkSize) : configuredChunkSize;
     const interChunkDelayMs = this.delayMs || 20;
 
     for (let i = 0; i < outgoing.length; i += chunkSize) {

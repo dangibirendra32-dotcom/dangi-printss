@@ -59,16 +59,15 @@ import html2canvas from 'html2canvas';
 const waitForImagesToLoad = (container: HTMLElement): Promise<void> => {
   const images = Array.from(container.querySelectorAll('img'));
   if (images.length === 0) return Promise.resolve();
-  return Promise.all(
-    images.map(img =>
-      img.complete
-        ? Promise.resolve()
-        : new Promise<void>(resolve => {
-            img.addEventListener('load', () => resolve(), { once: true });
-            img.addEventListener('error', () => resolve(), { once: true });
-          })
-    )
-  ).then(() => undefined);
+  return Promise.all(images.map(async img => {
+    if (!img.complete) {
+      await new Promise<void>(resolve => {
+        img.addEventListener('load', () => resolve(), { once: true });
+        img.addEventListener('error', () => resolve(), { once: true });
+      });
+    }
+    try { if (typeof img.decode === 'function') await img.decode(); } catch { /* WebView fallback */ }
+  })).then(() => undefined);
 };
 import { jsPDF } from 'jspdf';
 import { Capacitor } from '@capacitor/core';
@@ -139,11 +138,11 @@ export default function App() {
   const [bluetoothConnectionError, setBluetoothConnectionError] = useState<string>('');
 
   const [bleChunkSize, setBleChunkSize] = useState<number>(() => {
-    return Number(localStorage.getItem('dangi_ble_chunk_size')) || 64;
+    return Number(localStorage.getItem('dangi_ble_chunk_size')) || 128;
   });
   const [bleDelayMs, setBleDelayMs] = useState<number>(() => {
     const saved = localStorage.getItem('dangi_ble_delay_ms');
-    return saved !== null ? Number(saved) : 15;
+    return saved !== null ? Number(saved) : 20;
   });
   const [bleForceWriteWithResponse, setBleForceWriteWithResponse] = useState<boolean>(() => {
     return localStorage.getItem('dangi_ble_force_write') === 'true';
@@ -387,8 +386,8 @@ export default function App() {
     if (rData.type !== 'RESTAURANT' || rData.restaurantLogo === 'NONE') return '';
 
     const badge = (innerHtml: string) => `
-      <div style="display: flex; justify-content: center; margin-bottom: 8px;">
-        <div style="width: 40px; height: 40px; border: 2px solid #0f172a; border-radius: 9999px; display: flex; align-items: center; justify-content: center; font-size: 18px; line-height: 1;">
+      <div style="display:flex; justify-content:center; align-items:center; width:100%; height:48px; margin-bottom:10px;">
+        <div style="width:44px; height:44px; min-width:44px; min-height:44px; box-sizing:border-box; border:2px solid #0f172a; border-radius:9999px; display:flex; align-items:center; justify-content:center; overflow:hidden; line-height:0;">
           ${innerHtml}
         </div>
       </div>
@@ -396,58 +395,55 @@ export default function App() {
 
     if (rData.restaurantLogo === 'CUSTOM') {
       if (rData.restaurantCustomLogoUrl) {
-        return badge(`<img src="${rData.restaurantCustomLogoUrl}" style="width: 26px; height: 26px; object-fit: contain;" />`);
+        return badge(`<img src="${rData.restaurantCustomLogoUrl}" width="28" height="28" style="display:block; width:28px; height:28px; max-width:28px; max-height:28px; object-fit:contain; flex:0 0 28px;" />`);
       }
-      return badge('🍴'); // Fallback to the default utensils symbol, matching the on-screen preview's fallback behavior
+      return badge('<span style="display:flex; align-items:center; justify-content:center; width:28px; height:28px; font-family:Arial,sans-serif; font-size:8px; font-weight:900; letter-spacing:.4px;">UTENSILS</span>');
     }
 
     const symbolByLogo: Record<Exclude<NonNullable<ReceiptData['restaurantLogo']>, 'NONE' | 'CUSTOM'>, string> = {
-      UTENSILS: '🍴',
-      COFFEE: '☕',
-      PIZZA: '🍕',
-      FLAME: '🔥',
-      BAR: '🍷',
+      UTENSILS: 'UTENSILS', COFFEE: 'CAFE', PIZZA: 'PIZZA', FLAME: 'GRILL', BAR: 'BAR',
     };
-    const symbol = symbolByLogo[(rData.restaurantLogo || 'UTENSILS') as keyof typeof symbolByLogo] || '🍴';
-    return badge(symbol);
+    const symbol = symbolByLogo[(rData.restaurantLogo || 'UTENSILS') as keyof typeof symbolByLogo] || 'UTENSILS';
+    return badge(`<span style="display:flex; align-items:center; justify-content:center; width:28px; height:28px; font-family:Arial,sans-serif; font-size:8px; font-weight:900; letter-spacing:.4px; text-align:center;">${symbol}</span>`);
   };
 
   const renderReceiptHtmlForExport = (rData: ReceiptData): string => {
     if (rData.type === 'PETROL') {
       const p = rData.petrolDetails;
+      const petrolRow = (label: string, value: string) => `
+        <div style="display:grid; grid-template-columns:48% 52%; column-gap:6px; align-items:baseline; margin:0 0 7px 0; line-height:1.25; font-weight:900;">
+          <span style="white-space:nowrap;">${label}</span><span style="text-align:right; overflow-wrap:anywhere; word-break:break-word;">${value}</span>
+        </div>`;
       return `
-        <div style="width: 100%; color: #1e293b; font-family: monospace; font-size: 11px; font-weight: 900; box-sizing: border-box; background-color: #ffffff;">
+        <div style="width:100%; color:#111827; font-family:monospace; font-size:12px; font-weight:900; box-sizing:border-box; background-color:#ffffff;">
           ${getPetrolLogoHtmlForPdf(p)}
           <div style="text-align: center; font-weight: 900; font-size: 12px; margin-bottom: 8px; margin-top: 4px;">WELCOME!!!</div>
           <div style="text-align: center; font-size: 11px; margin-bottom: 8px; line-height: 1.2; font-weight: 900; text-transform: uppercase;">${(rData.companyName || '').toUpperCase()}</div>
           <div style="text-align: center; font-size: 10px; margin-bottom: 16px; line-height: 1.2;">${rData.address || ''}</div>
           
-          <div style="font-size: 10px; margin-bottom: 16px; border-top: 1px dashed #cbd5e1; border-bottom: 1px dashed #cbd5e1; padding: 8px 0;">
-            <div style="display: flex; justify-content: space-between; margin-bottom: 3px;"><span>TEL NO:</span> <span>${p?.telNo || ''}</span></div>
-            <div style="display: flex; justify-content: space-between; margin-bottom: 3px;"><span>RECEIPT NO:</span> <span>${p?.receiptNo || ''}</span></div>
-            <div style="display: flex; justify-content: space-between; margin-bottom: 3px;"><span>FCC ID:</span> <span>${p?.fccId || 'N/A'}</span></div>
-            <div style="display: flex; justify-content: space-between; margin-bottom: 3px;"><span>FIP NO:</span> <span>${p?.fipNo || 'N/A'}</span></div>
-            <div style="display: flex; justify-content: space-between;"><span>NOZZLE NO:</span> <span>${p?.nozzleNo || 'N/A'}</span></div>
+          <div style="font-size:11px; margin:0 0 14px 0; border-top:1px dashed #9ca3af; border-bottom:1px dashed #9ca3af; padding:10px 0 7px 0;">
+            ${petrolRow('TEL NO:', p?.telNo || '')}
+            ${petrolRow('RECEIPT NO:', p?.receiptNo || '')}
+            ${petrolRow('FCC ID:', p?.fccId || 'N/A')}
+            ${petrolRow('FIP NO:', p?.fipNo || 'N/A')}
+            ${petrolRow('NOZZLE NO:', p?.nozzleNo || 'N/A')}
           </div>
-
-          <div style="font-size: 11px; margin-top: 12px; margin-bottom: 12px; padding: 8px 0; border-bottom: 1px dashed #cbd5e1; font-weight: 900;">
-            <div style="display: flex; justify-content: space-between; text-transform: uppercase; margin-bottom: 4px;"><span>PRODUCT:</span> <span>${p?.product || ''}</span></div>
-            <div style="display: flex; justify-content: space-between; text-transform: uppercase; margin-bottom: 4px;"><span>RATE/LTR:</span> <span>${(p?.ratePerLtr || 0).toFixed(2)}</span></div>
-            <div style="display: flex; justify-content: space-between; text-transform: uppercase; margin-bottom: 4px;"><span>AMOUNT:</span> <span>₹${(p?.amount || 0).toFixed(2)}</span></div>
-            <div style="display: flex; justify-content: space-between; text-transform: uppercase;"><span>VOLUME(LTR):</span> <span>${(p?.volumeLtr || 0).toFixed(2)} lt</span></div>
+          <div style="font-size:12px; margin:0 0 14px 0; padding:10px 0 6px 0; border-bottom:1px dashed #9ca3af; font-weight:900;">
+            ${petrolRow('PRODUCT:', p?.product || '')}
+            ${petrolRow('RATE/LTR:', (p?.ratePerLtr || 0).toFixed(2))}
+            ${petrolRow('AMOUNT:', `₹${(p?.amount || 0).toFixed(2)}`)}
+            ${petrolRow('VOLUME(LTR):', `${(p?.volumeLtr || 0).toFixed(2)} lt`)}
           </div>
-
-          <div style="font-size: 10px; margin-bottom: 12px;">
-            <div style="display: flex; justify-content: space-between; text-transform: uppercase; margin-bottom: 3px;"><span>VEH TYPE:</span> <span>${p?.vehType || ''}</span></div>
-            <div style="display: flex; justify-content: space-between; text-transform: uppercase; margin-bottom: 3px;"><span>VEH NO:</span> <span>${p?.vehicleNumber || ''}</span></div>
-            <div style="display: flex; justify-content: space-between; text-transform: uppercase;"><span>CUSTOMER:</span> <span>${p?.customerName || ''}</span></div>
+          <div style="font-size:11px; margin-bottom:14px;">
+            ${petrolRow('VEH TYPE:', p?.vehType || '')}
+            ${petrolRow('VEH NO:', p?.vehicleNumber || '')}
+            ${petrolRow('CUSTOMER:', p?.customerName || '')}
           </div>
-
-          <div style="font-size: 10px; padding-top: 8px; border-top: 1px dashed #cbd5e1;">
-            <div style="display: flex; justify-content: space-between; text-transform: uppercase; margin-bottom: 3px;"><span>DATE:</span> <span>${rData.date || ''} ${rData.time || ''}</span></div>
-            <div style="display: flex; justify-content: space-between; text-transform: uppercase; margin-bottom: 3px;"><span>MODE:</span> <span>${rData.paymentMode || ''}</span></div>
-            <div style="display: flex; justify-content: space-between; text-transform: uppercase; margin-bottom: 3px;"><span>VAT NO:</span> <span>${p?.vatNo || 'N/A'}</span></div>
-            <div style="display: flex; justify-content: space-between; text-transform: uppercase;"><span>ATTENDANT:</span> <span>${p?.attendantId || ''}</span></div>
+          <div style="font-size:11px; padding-top:10px; border-top:1px dashed #9ca3af;">
+            ${petrolRow('DATE:', `${rData.date || ''} ${rData.time || ''}`)}
+            ${petrolRow('MODE:', rData.paymentMode || '')}
+            ${petrolRow('VAT NO:', p?.vatNo || 'N/A')}
+            ${petrolRow('ATTENDANT:', p?.attendantId || '')}
           </div>
 
           <div style="text-align: center; margin-top: 24px; margin-bottom: 8px;">
@@ -471,29 +467,30 @@ export default function App() {
     return `
       <div style="width: 100%; color: #1e293b; font-family: monospace; font-size: 11px; box-sizing: border-box; background-color: #ffffff;">
         ${getRestaurantLogoHtmlForPdf(rData)}
-        <h1 style="font-size: 14px; font-weight: 900; text-align: center; margin-bottom: 4px; line-height: 1; text-transform: uppercase; color: #0f172a;">${rData.companyName || 'STORE'}</h1>
-        <p style="text-align: center; font-size: 10px; margin-bottom: 8px; white-space: normal;">${rData.address || ''}</p>
-        <div style="width: 100%; height: 1px; border-bottom: 1px dashed #cbd5e1; margin: 8px 0;"></div>
+        <h1 style="font-size:${rData.type === 'RESTAURANT' ? '15px' : '14px'}; font-weight:900; text-align:center; margin-bottom:4px; line-height:1; text-transform:uppercase; color:#0f172a;">${rData.companyName || 'STORE'}</h1>
+        <p style="text-align:center; font-size:10px; margin-bottom:6px; white-space:normal;">${rData.address || ''}</p>
+        ${rData.type === 'RESTAURANT' ? `<div style="text-align:center; font-size:8px; font-weight:900; letter-spacing:2px; margin-bottom:8px;">DINING • ORDER RECEIPT</div>` : ''}
+        <div style="width:100%; height:1px; border-bottom:1px dashed #cbd5e1; margin:8px 0;"></div>
 
-        <div style="width: 100%; display: flex; justify-content: space-between; font-size: 10px; padding: 0 4px; margin-bottom: 2px;">
-          <span>DATE: ${rData.date || ''}</span>
-          <span>TIME: ${rData.time || ''}</span>
+        <div style="width:100%; font-size:10px; padding:${rData.type === 'RESTAURANT' ? '7px 5px' : '0 4px'}; margin-bottom:6px; box-sizing:border-box; ${rData.type === 'RESTAURANT' ? 'background:#f8fafc; border:1px solid #cbd5e1; border-radius:5px;' : ''}">
+          <div style="display:flex; justify-content:space-between;"><span>DATE: ${rData.date || ''}</span><span>TIME: ${rData.time || ''}</span></div>
+          <div>BILL NO: ${rData.billNumber || ''}</div>
+          ${rData.showGst !== false ? `<div>GSTIN: ${rData.gstNumber || 'N/A'}</div>` : ''}
+          <div>MODE: ${rData.paymentMode || ''}</div>
         </div>
-        <div style="width: 100%; padding: 0 4px; font-size: 10px; margin-bottom: 2px;">BILL NO: ${rData.billNumber || ''}</div>
-        ${rData.showGst !== false ? `<div style="width: 100%; padding: 0 4px; font-size: 10px; margin-bottom: 2px;">GSTIN: ${rData.gstNumber || 'N/A'}</div>` : ''}
-        <div style="width: 100%; padding: 0 4px; font-size: 10px; margin-bottom: 8px;">MODE: ${rData.paymentMode || ''}</div>
 
-        <div style="width: 100%; height: 1px; border-bottom: 1px dashed #cbd5e1; margin: 8px 0;"></div>
+        <div style="width:100%; height:1px; border-bottom:1px dashed #cbd5e1; margin:8px 0;"></div>
 
-        <div style="width: 100%; padding: 0 4px;">
-          <div style="display: flex; justify-content: space-between; font-weight: 900; font-size: 10px; margin-bottom: 4px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px;">
-            <span style="width: 8%;">#</span>
-            <span style="width: 32%;">ITEM</span>
-            <span style="width: 15%; text-align: right;">QTY</span>
-            <span style="width: 20%; text-align: right;">RATE</span>
-            <span style="width: 25%; text-align: right;">TOTAL</span>
+        <div style="width:100%; padding:${rData.type === 'RESTAURANT' ? '7px 6px' : '0 4px'}; box-sizing:border-box; ${rData.type === 'RESTAURANT' ? 'border:1px solid #cbd5e1; border-radius:5px;' : ''}">
+          ${rData.type === 'RESTAURANT' ? `<div style="font-size:8px; font-weight:900; letter-spacing:1.5px; color:#64748b; margin-bottom:6px;">ORDER DETAILS</div>` : ''}
+          <div style="display:flex; justify-content:space-between; font-weight:900; font-size:10px; margin-bottom:4px; border-bottom:1px solid #e2e8f0; padding-bottom:4px;">
+            <span style="width:8%;">#</span>
+            <span style="width:32%;">ITEM</span>
+            <span style="width:15%; text-align:right;">QTY</span>
+            <span style="width:20%; text-align:right;">RATE</span>
+            <span style="width:25%; text-align:right;">TOTAL</span>
           </div>
-          <div style="margin-bottom: 8px;">${itemsHtml}</div>
+          <div style="margin-bottom:8px;">${itemsHtml}</div>
         </div>
 
         <div style="width: 100%; height: 1px; border-bottom: 1px dashed #cbd5e1; margin: 8px 0;"></div>
@@ -524,14 +521,25 @@ export default function App() {
       tempDiv.style.width = '288px';
       tempDiv.style.backgroundColor = '#ffffff';
       tempDiv.style.color = '#1e293b';
-      tempDiv.style.padding = '24px 16px';
       tempDiv.style.boxSizing = 'border-box';
       tempDiv.style.zIndex = '-9999';
       tempDiv.style.fontFamily = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
-      tempDiv.innerHTML = renderReceiptHtmlForExport(targetData);
+      const liveReceipt = !customData ? document.getElementById('receipt-paper-container') : null;
+      if (liveReceipt) {
+        const clone = liveReceipt.cloneNode(true) as HTMLElement;
+        clone.removeAttribute('id');
+        clone.style.width = '288px';
+        clone.style.margin = '0';
+        clone.style.boxShadow = 'none';
+        clone.style.transform = 'none';
+        tempDiv.appendChild(clone);
+      } else {
+        tempDiv.style.padding = '24px 16px';
+        tempDiv.innerHTML = renderReceiptHtmlForExport(targetData);
+      }
       document.body.appendChild(tempDiv);
 
-      await new Promise(resolve => setTimeout(resolve, 80));
+      await new Promise(resolve => setTimeout(resolve, 100));
       await waitForImagesToLoad(tempDiv);
 
       const canvas = await html2canvas(tempDiv, {
@@ -724,7 +732,7 @@ export default function App() {
         adjusted.total = adjusted.subtotal;
       }
 
-      if (printerProtocol === 'cat-printer') {
+      if (printer.getPrinterType() === 'catprinter') {
         const originalData = { ...data };
         setData(adjusted);
         
@@ -768,8 +776,10 @@ export default function App() {
 
       if (adjusted.type === 'PETROL') {
         chunks.push(cmds.BOLD_ON);
+        chunks.push(cmds.TEXT_SIZE_LARGE);
         chunks.push(ThermalPrinter.textToUint8("WELCOME!!!"));
         chunks.push(ThermalPrinter.textToUint8(`${adjusted.companyName.toUpperCase()}`));
+        chunks.push(cmds.TEXT_SIZE_NORMAL);
         chunks.push(ThermalPrinter.textToUint8(adjusted.address));
         chunks.push(ThermalPrinter.textToUint8(`TEL NO: ${adjusted.petrolDetails?.telNo}`));
         chunks.push(ThermalPrinter.textToUint8(`RECEIPT NO: ${adjusted.petrolDetails?.receiptNo}`));
@@ -778,11 +788,13 @@ export default function App() {
         chunks.push(ThermalPrinter.textToUint8(`NOZZLE NO: ${adjusted.petrolDetails?.nozzleNo}`));
         
         chunks.push(cmds.ALIGN_LEFT);
-        chunks.push(ThermalPrinter.textToUint8(` `));
+        chunks.push(cmds.BOLD_ON);
+        chunks.push(cmds.TEXT_SIZE_LARGE);
         chunks.push(ThermalPrinter.textToUint8(`PRODUCT: ${adjusted.petrolDetails?.product}`));
         chunks.push(ThermalPrinter.textToUint8(`RATE/LTR: ${adjusted.petrolDetails?.ratePerLtr.toFixed(2)}`));
         chunks.push(ThermalPrinter.textToUint8(`AMOUNT: ${adjusted.petrolDetails?.amount.toFixed(2)}`));
         chunks.push(ThermalPrinter.textToUint8(`VOLUME(LTR): ${adjusted.petrolDetails?.volumeLtr.toFixed(2)} lt`));
+        chunks.push(cmds.TEXT_SIZE_NORMAL);
         chunks.push(ThermalPrinter.textToUint8(` `));
         chunks.push(ThermalPrinter.textToUint8(`VEH TYPE: ${adjusted.petrolDetails?.vehType}`));
         chunks.push(ThermalPrinter.textToUint8(`VEH NO: ${adjusted.petrolDetails?.vehicleNumber}`));
@@ -941,6 +953,9 @@ export default function App() {
         setPrinter(newPrinter);
         setIsPrinterConnected(true);
         setBluetoothConnectionError('');
+        const detectedProtocol = newPrinter.getPrinterType() === 'catprinter' ? 'cat-printer' : 'esc-pos';
+        setPrinterProtocol(detectedProtocol);
+        localStorage.setItem('dangi_printer_protocol', detectedProtocol);
         
         setActiveServiceUuid(newPrinter.connectedServiceUuid);
         setActiveCharacteristicUuid(newPrinter.connectedCharacteristicUuid);
@@ -975,7 +990,7 @@ export default function App() {
       return;
     }
     try {
-      if (printerProtocol === 'cat-printer') {
+      if (printer.getPrinterType() === 'catprinter') {
         const canvas = document.createElement('canvas');
         canvas.width = 384;
         canvas.height = 240;
@@ -1044,7 +1059,7 @@ export default function App() {
     }
 
     try {
-      if (printerProtocol === 'cat-printer') {
+      if (printer.getPrinterType() === 'catprinter') {
         const container = document.getElementById('receipt-paper-container');
         if (!container) {
           throw new Error("Receipt preview element not found.");
@@ -1084,8 +1099,10 @@ export default function App() {
 
       if (data.type === 'PETROL') {
         chunks.push(cmds.BOLD_ON);
+        chunks.push(cmds.TEXT_SIZE_LARGE);
         chunks.push(ThermalPrinter.textToUint8("WELCOME!!!"));
         chunks.push(ThermalPrinter.textToUint8(`${data.companyName.toUpperCase()}`));
+        chunks.push(cmds.TEXT_SIZE_NORMAL);
         chunks.push(ThermalPrinter.textToUint8(data.address));
         chunks.push(ThermalPrinter.textToUint8(`TEL NO: ${data.petrolDetails?.telNo}`));
         chunks.push(ThermalPrinter.textToUint8(`RECEIPT NO: ${data.petrolDetails?.receiptNo}`));
@@ -1094,11 +1111,13 @@ export default function App() {
         chunks.push(ThermalPrinter.textToUint8(`NOZZLE NO: ${data.petrolDetails?.nozzleNo}`));
         
         chunks.push(cmds.ALIGN_LEFT);
-        chunks.push(ThermalPrinter.textToUint8(` `));
+        chunks.push(cmds.BOLD_ON);
+        chunks.push(cmds.TEXT_SIZE_LARGE);
         chunks.push(ThermalPrinter.textToUint8(`PRODUCT: ${data.petrolDetails?.product}`));
         chunks.push(ThermalPrinter.textToUint8(`RATE/LTR: ${data.petrolDetails?.ratePerLtr.toFixed(2)}`));
         chunks.push(ThermalPrinter.textToUint8(`AMOUNT: ${data.petrolDetails?.amount.toFixed(2)}`));
         chunks.push(ThermalPrinter.textToUint8(`VOLUME(LTR): ${data.petrolDetails?.volumeLtr.toFixed(2)} lt`));
+        chunks.push(cmds.TEXT_SIZE_NORMAL);
         chunks.push(ThermalPrinter.textToUint8(` `));
         chunks.push(ThermalPrinter.textToUint8(`VEH TYPE: ${data.petrolDetails?.vehType}`));
         chunks.push(ThermalPrinter.textToUint8(`VEH NO: ${data.petrolDetails?.vehicleNumber}`));
@@ -2197,8 +2216,8 @@ export default function App() {
               {/* Receipt Content -> Strictly 2 inches width emulation */}
               <div id="receipt-paper-container" className="receipt-paper font-mono text-[11px] leading-tight text-slate-800 antialiased mx-auto flex flex-col items-center bg-white px-4 py-6 w-[288px]">
                 {activeTab === 'PETROL' ? (
-                  <div className="w-full font-black">
-                    <div className="flex flex-col items-center mb-6 mt-4 min-h-[160px] justify-center w-full">
+                  <div className="w-full font-black text-[12px] leading-tight">
+                    <div className="flex flex-col items-center mb-5 mt-3 min-h-[145px] justify-center w-full">
                       <div className="w-44 h-44 flex items-center justify-center">
                         {data.petrolDetails?.company === 'CUSTOM' ? (
                           data.petrolDetails?.customLogoUrl ? (
@@ -2222,37 +2241,37 @@ export default function App() {
                       </div>
                     </div>
                     
-                    <div className="text-center font-black text-[12px] mb-2">WELCOME!!!</div>
+                    <div className="text-center font-black text-[14px] mb-2">WELCOME!!!</div>
                     
-                    <div className="text-center text-[11px] mb-4 leading-tight font-black">{data.companyName.toUpperCase()}</div>
-                    <div className="text-center text-[10px] mb-4 leading-tight">{data.address}</div>
+                    <div className="text-center text-[13px] mb-4 leading-tight font-black">{data.companyName.toUpperCase()}</div>
+                    <div className="text-center text-[11px] mb-4 leading-tight font-bold">{data.address}</div>
                     
-                    <div className="text-[10px] space-y-1.5 mb-6">
-                      <div className="flex justify-between"><span>TEL NO:</span> <span>{data.petrolDetails?.telNo}</span></div>
-                      <div className="flex justify-between"><span>RECEIPT NO:</span> <span>{data.petrolDetails?.receiptNo}</span></div>
-                      <div className="flex justify-between"><span>FCC ID:</span> <span>{data.petrolDetails?.fccId || 'N/A'}</span></div>
-                      <div className="flex justify-between"><span>FIP NO:</span> <span>{data.petrolDetails?.fipNo || 'N/A'}</span></div>
-                      <div className="flex justify-between"><span>NOZZLE NO:</span> <span>{data.petrolDetails?.nozzleNo || 'N/A'}</span></div>
+                    <div className="text-[11px] space-y-2 mb-5 font-black">
+                      <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline"><span>TEL NO:</span> <span className="text-right break-words">{data.petrolDetails?.telNo}</span></div>
+                      <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline"><span>RECEIPT NO:</span> <span className="text-right break-words">{data.petrolDetails?.receiptNo}</span></div>
+                      <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline"><span>FCC ID:</span> <span className="text-right break-words">{data.petrolDetails?.fccId || 'N/A'}</span></div>
+                      <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline"><span>FIP NO:</span> <span className="text-right break-words">{data.petrolDetails?.fipNo || 'N/A'}</span></div>
+                      <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline"><span>NOZZLE NO:</span> <span className="text-right break-words">{data.petrolDetails?.nozzleNo || 'N/A'}</span></div>
                     </div>
 
-                    <div className="text-[11px] space-y-2 mt-4 mb-6 py-4 border-y border-dashed border-slate-300 font-black">
-                      <div className="flex justify-between uppercase"><span>PRODUCT:</span> <span>{data.petrolDetails?.product}</span></div>
-                      <div className="flex justify-between uppercase"><span>RATE/LTR:</span> <span>{data.petrolDetails?.ratePerLtr.toFixed(2)}</span></div>
-                      <div className="flex justify-between uppercase"><span>AMOUNT:</span> <span>₹{data.petrolDetails?.amount.toFixed(2)}</span></div>
-                      <div className="flex justify-between uppercase"><span>VOLUME(LTR):</span> <span>{data.petrolDetails?.volumeLtr.toFixed(2)} lt</span></div>
+                    <div className="text-[12px] space-y-2.5 mt-3 mb-5 py-4 border-y border-dashed border-slate-300 font-black">
+                      <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline uppercase"><span>PRODUCT:</span> <span className="text-right break-words">{data.petrolDetails?.product}</span></div>
+                      <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline uppercase"><span>RATE/LTR:</span> <span className="text-right break-words">{data.petrolDetails?.ratePerLtr.toFixed(2)}</span></div>
+                      <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline uppercase"><span>AMOUNT:</span> <span className="text-right break-words">₹{data.petrolDetails?.amount.toFixed(2)}</span></div>
+                      <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline uppercase"><span>VOLUME(LTR):</span> <span className="text-right break-words">{data.petrolDetails?.volumeLtr.toFixed(2)} lt</span></div>
                     </div>
 
-                    <div className="text-[10px] space-y-1.5 mb-6">
-                      <div className="flex justify-between uppercase"><span>VEH TYPE:</span> <span>{data.petrolDetails?.vehType}</span></div>
-                      <div className="flex justify-between uppercase"><span>VEH NO:</span> <span>{data.petrolDetails?.vehicleNumber}</span></div>
-                      <div className="flex justify-between uppercase"><span>CUSTOMER:</span> <span className="max-w-[120px] text-right">{data.petrolDetails?.customerName || ''}</span></div>
+                    <div className="text-[11px] space-y-2 mb-5 font-black">
+                      <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline uppercase"><span>VEH TYPE:</span> <span className="text-right break-words">{data.petrolDetails?.vehType}</span></div>
+                      <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline uppercase"><span>VEH NO:</span> <span className="text-right break-words">{data.petrolDetails?.vehicleNumber}</span></div>
+                      <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline uppercase"><span>CUSTOMER:</span> <span className="max-w-[120px] text-right">{data.petrolDetails?.customerName || ''}</span></div>
                     </div>
 
-                    <div className="text-[10px] space-y-1.5 pt-2">
-                      <div className="flex justify-between uppercase"><span>DATE:</span> <span>{data.date} {data.time}</span></div>
-                      <div className="flex justify-between uppercase"><span>MODE:</span> <span>{data.paymentMode}</span></div>
-                      <div className="flex justify-between uppercase"><span>VAT NO:</span> <span>{data.petrolDetails?.vatNo || 'N/A'}</span></div>
-                      <div className="flex justify-between uppercase"><span>ATTENDANT:</span> <span>{data.petrolDetails?.attendantId}</span></div>
+                    <div className="text-[11px] space-y-2 pt-2 font-black">
+                      <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline uppercase"><span>DATE:</span> <span className="text-right break-words">{data.date} {data.time}</span></div>
+                      <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline uppercase"><span>MODE:</span> <span className="text-right break-words">{data.paymentMode}</span></div>
+                      <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline uppercase"><span>VAT NO:</span> <span className="text-right break-words">{data.petrolDetails?.vatNo || 'N/A'}</span></div>
+                      <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline uppercase"><span>ATTENDANT:</span> <span className="text-right break-words">{data.petrolDetails?.attendantId}</span></div>
                     </div>
 
                     <div className="flex flex-col items-center mt-12 mb-4">
@@ -2281,31 +2300,39 @@ export default function App() {
                       </div>
                     )}
 
-                    <h1 className="text-base font-black text-center mb-1 leading-none uppercase">{data.companyName}</h1>
-                    <p className="text-center text-[10px] whitespace-normal mb-2 max-w-[180px]">{data.address}</p>
+                    <h1 className={`text-center font-black mb-1 leading-none uppercase ${data.type === 'RESTAURANT' ? 'text-[15px] tracking-tight' : 'text-base'}`}>{data.companyName}</h1>
+                    <p className="text-center text-[10px] whitespace-normal mb-2 max-w-[210px]">{data.address}</p>
+                    {data.type === 'RESTAURANT' && (
+                      <div className="text-center text-[8px] font-black tracking-[0.22em] uppercase mb-2">DINING • ORDER RECEIPT</div>
+                    )}
                     <div className="w-full h-[1px] border-b border-dashed border-slate-300 my-2"></div>
                     
                     {/* Header Info */}
-                    <div className="w-full flex justify-between px-1">
-                      <span>DATE: {data.date}</span>
-                      <span>TIME: {data.time}</span>
+                    <div className={`w-full px-1 ${data.type === 'RESTAURANT' ? 'bg-slate-50 border border-slate-200 rounded-md py-1.5 mb-2' : 'mb-1'}`}>
+                      <div className="flex justify-between">
+                        <span>DATE: {data.date}</span>
+                        <span>TIME: {data.time}</span>
+                      </div>
+                      <div>BILL NO: {data.billNumber}</div>
+                      {data.showGst !== false && <div>GSTIN: {data.gstNumber || 'N/A'}</div>}
+                      <div>MODE: {data.paymentMode}</div>
                     </div>
-                    <div className="w-full px-1">BILL NO: {data.billNumber}</div>
-                    {data.showGst !== false && <div className="w-full px-1">GSTIN: {data.gstNumber || 'N/A'}</div>}
-                    <div className="w-full px-1 mb-2">MODE: {data.paymentMode}</div>
 
                     <div className="w-full h-[1px] border-b border-dashed border-slate-300 my-2"></div>
                     
                     {/* Items Table */}
-                    <div className="w-full px-1">
-                      <div className="flex justify-between font-black text-[10px] mb-1">
+                    <div className={`w-full px-1 ${data.type === 'RESTAURANT' ? 'border border-slate-300 rounded-md p-1.5' : ''}`}>
+                      {data.type === 'RESTAURANT' && (
+                        <div className="text-[8px] font-black uppercase tracking-widest mb-1.5 text-slate-500">ORDER DETAILS</div>
+                      )}
+                      <div className="flex justify-between font-black text-[10px] mb-1 border-b border-slate-200 pb-1">
                         <span className="w-[8%]">#</span>
                         <span className="w-[32%]">ITEM</span>
                         <span className="w-[15%] text-right">QTY</span>
                         <span className="w-[20%] text-right">RATE</span>
                         <span className="w-[25%] text-right">TOTAL</span>
                       </div>
-                      <div className="space-y-1 mb-2">
+                      <div className="space-y-1.5 mb-2">
                         {data.items.map((item, index) => (
                           <div key={item.id} className="flex justify-between items-start">
                             <span className="w-[8%]">{index + 1}</span>
@@ -2698,8 +2725,8 @@ export default function App() {
                       >
                         <option value={20}>20 bytes (Legacy/Safest)</option>
                         <option value={32}>32 bytes</option>
-                        <option value={64}>64 bytes (Default)</option>
-                        <option value={128}>128 bytes</option>
+                        <option value={64}>64 bytes</option>
+                        <option value={128}>128 bytes (Recommended)</option>
                         <option value={256}>256 bytes (Fastest)</option>
                       </select>
                     </div>
