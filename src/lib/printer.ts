@@ -38,6 +38,9 @@ export class ThermalPrinter {
   private nativeMtu: number | null = null;
 
   private printerType: PrinterType = 'escpos';
+
+  /** Human-readable reason for the most recent failed connect() (empty if none). */
+  public lastError: string = '';
   
   // Energy level for cat printers - adjustable
   private catPrinterEnergy: number = DEFAULT_ENERGY;
@@ -127,7 +130,20 @@ export class ThermalPrinter {
     return this.connectWeb(customServiceUuid, customCharUuid);
   }
 
+  private static describeBleError(error: unknown): string {
+    const raw = (error as any)?.message || String(error || '');
+    if (/cancel/i.test(raw)) return 'Device selection was cancelled.';
+    if (/permission|denied|not authori/i.test(raw)) {
+      return 'Bluetooth permission was denied. Allow "Nearby devices" (and Location on older Android) for this app in Android Settings, then try again.';
+    }
+    if (/(not|isn.t).*(enabled|powered|available)|turned off|disabled/i.test(raw)) {
+      return 'Bluetooth appears to be off. Turn on Bluetooth (and Location) and try again.';
+    }
+    return `${raw || 'Unknown error'}. Tips: switch the printer on, keep it close, make sure no other phone/app is connected to it, and keep Bluetooth + Location ON.`;
+  }
+
   private async connectNative(customServiceUuid?: string, customCharUuid?: string): Promise<boolean> {
+    this.lastError = '';
     try {
       await BleClient.initialize();
 
@@ -148,12 +164,28 @@ export class ThermalPrinter {
         this.nativeMtu = null;
       });
 
-      const services = await BleClient.getServices(device.deviceId);
+      // Android needs a short moment after connecting before GATT service
+      // discovery is reliable; some mini printers otherwise return an empty
+      // list. Retry a few times before giving up.
+      let services = await (async () => {
+        let found: Awaited<ReturnType<typeof BleClient.getServices>> = [];
+        for (let attempt = 0; attempt < 3; attempt++) {
+          await new Promise(resolve => setTimeout(resolve, attempt === 0 ? 400 : 700));
+          try {
+            found = await BleClient.getServices(device.deviceId);
+          } catch (e) {
+            found = [];
+          }
+          if (found.length > 0) break;
+        }
+        return found;
+      })();
       this.availableServices = services.map(s => s.uuid);
 
       try {
-        this.nativeMtu = await BleClient.getMtu(device.deviceId);
-        console.log(`BLE MTU: ${this.nativeMtu}, max write payload: ${Math.max(20, this.nativeMtu - 3)} bytes`);
+        const mtu = await BleClient.getMtu(device.deviceId);
+        this.nativeMtu = mtu;
+        console.log(`BLE MTU: ${mtu}, max write payload: ${Math.max(20, mtu - 3)} bytes`);
       } catch {
         this.nativeMtu = null;
       }
@@ -233,11 +265,13 @@ export class ThermalPrinter {
       return true;
     } catch (error) {
       console.error('Native Bluetooth connection failed:', error);
+      this.lastError = ThermalPrinter.describeBleError(error);
       return false;
     }
   }
 
   private async connectWeb(customServiceUuid?: string, customCharUuid?: string): Promise<boolean> {
+    this.lastError = '';
     try {
       const optionalServices = [...CAT_PRINTER_SERVICE_UUIDS, ...ThermalPrinter.KNOWN_SERVICES];
       if (customServiceUuid && !optionalServices.includes(customServiceUuid)) {
@@ -352,6 +386,7 @@ export class ThermalPrinter {
       return true;
     } catch (error) {
       console.error('Bluetooth connection failed:', error);
+      this.lastError = ThermalPrinter.describeBleError(error);
       return false;
     }
   }

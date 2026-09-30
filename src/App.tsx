@@ -69,14 +69,57 @@ const waitForImagesToLoad = (container: HTMLElement): Promise<void> => {
     try { if (typeof img.decode === 'function') await img.decode(); } catch { /* WebView fallback */ }
   })).then(() => undefined);
 };
+
+// html2canvas does not reliably honour `object-fit: contain`, which is why a
+// custom logo could look squashed/stretched in exported PDFs and prints even
+// though the live preview looked fine. Any <img data-fit-box="WxH"> is
+// re-drawn ("contain"-fitted) onto an exact WxH canvas so the captured logo
+// keeps its aspect ratio. Returns a function that restores the original src.
+const fitLogosToBoxes = async (root: HTMLElement): Promise<() => void> => {
+  const restores: Array<() => void> = [];
+  const imgs = Array.from(root.querySelectorAll<HTMLImageElement>('img[data-fit-box]'));
+  for (const img of imgs) {
+    const [bw, bh] = (img.dataset.fitBox || '').split('x').map(Number);
+    if (!bw || !bh || !img.naturalWidth || !img.naturalHeight) continue;
+    try {
+      const scale = 4;
+      const canvas = document.createElement('canvas');
+      canvas.width = bw * scale;
+      canvas.height = bh * scale;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) continue;
+      const ratio = Math.min(canvas.width / img.naturalWidth, canvas.height / img.naturalHeight);
+      const dw = img.naturalWidth * ratio;
+      const dh = img.naturalHeight * ratio;
+      ctx.drawImage(img, (canvas.width - dw) / 2, (canvas.height - dh) / 2, dw, dh);
+      const dataUrl = canvas.toDataURL('image/png');
+      const oldSrc = img.getAttribute('src') || '';
+      const oldStyle = img.getAttribute('style');
+      img.setAttribute('src', dataUrl);
+      img.style.objectFit = 'fill';
+      img.style.width = `${bw}px`;
+      img.style.height = `${bh}px`;
+      restores.push(() => {
+        img.setAttribute('src', oldSrc);
+        if (oldStyle === null) img.removeAttribute('style'); else img.setAttribute('style', oldStyle);
+      });
+    } catch {
+      // Tainted canvas or decode failure: leave the image untouched.
+    }
+  }
+  await waitForImagesToLoad(root);
+  return () => restores.forEach(r => r());
+};
 import { jsPDF } from 'jspdf';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 
+import { renderToStaticMarkup } from 'react-dom/server';
 import { BillType, ReceiptData, ReceiptItem, PetrolCompany, HistoryItem } from './types';
 import { ThermalPrinter } from './lib/printer';
 import { PETROL_LOGOS, COMMON_ADDRESSES } from './constants';
+import { getStationRows, buildStationEscPos, escapeHtml } from './lib/petrolStation';
 
 const INITIAL_ITEMS: ReceiptItem[] = [
   { id: '1', name: 'Sample Item 1', quantity: 1, rate: 100, total: 100 }
@@ -103,6 +146,7 @@ export default function App() {
     fontSize: 'medium',
     fontStyle: 'normal',
     showGst: true,
+    petrolFormat: 'CLASSIC',
     petrolDetails: {
       company: 'JIO_BP',
       telNo: '7633481',
@@ -385,29 +429,51 @@ export default function App() {
   const getRestaurantLogoHtmlForPdf = (rData: ReceiptData): string => {
     if (rData.type !== 'RESTAURANT' || rData.restaurantLogo === 'NONE') return '';
 
+    // Same fixed 52x52 ring + same lucide icons (24px) as the live preview,
+    // so history/custom exports match Preview exactly.
     const badge = (innerHtml: string) => `
-      <div style="display:flex; justify-content:center; align-items:center; width:100%; height:48px; margin-bottom:10px;">
-        <div style="width:44px; height:44px; min-width:44px; min-height:44px; box-sizing:border-box; border:2px solid #0f172a; border-radius:9999px; display:flex; align-items:center; justify-content:center; overflow:hidden; line-height:0;">
+      <div style="display:flex; justify-content:center; align-items:center; width:100%; margin-bottom:16px;">
+        <div style="width:52px; height:52px; min-width:52px; min-height:52px; box-sizing:border-box; border:2px solid #0f172a; border-radius:9999px; display:flex; align-items:center; justify-content:center; overflow:hidden; line-height:0;">
           ${innerHtml}
         </div>
       </div>
     `;
+    const icon = (node: React.ReactElement) => renderToStaticMarkup(node);
 
-    if (rData.restaurantLogo === 'CUSTOM') {
-      if (rData.restaurantCustomLogoUrl) {
-        return badge(`<img src="${rData.restaurantCustomLogoUrl}" width="28" height="28" style="display:block; width:28px; height:28px; max-width:28px; max-height:28px; object-fit:contain; flex:0 0 28px;" />`);
-      }
-      return badge('<span style="display:flex; align-items:center; justify-content:center; width:28px; height:28px; font-family:Arial,sans-serif; font-size:8px; font-weight:900; letter-spacing:.4px;">UTENSILS</span>');
+    if (rData.restaurantLogo === 'CUSTOM' && rData.restaurantCustomLogoUrl) {
+      return badge(`<img src="${rData.restaurantCustomLogoUrl}" width="32" height="32" data-fit-box="32x32" style="display:block; width:32px; height:32px; min-width:32px; min-height:32px; max-width:none; object-fit:contain; flex:0 0 32px;" />`);
     }
-
-    const symbolByLogo: Record<Exclude<NonNullable<ReceiptData['restaurantLogo']>, 'NONE' | 'CUSTOM'>, string> = {
-      UTENSILS: 'UTENSILS', COFFEE: 'CAFE', PIZZA: 'PIZZA', FLAME: 'GRILL', BAR: 'BAR',
-    };
-    const symbol = symbolByLogo[(rData.restaurantLogo || 'UTENSILS') as keyof typeof symbolByLogo] || 'UTENSILS';
-    return badge(`<span style="display:flex; align-items:center; justify-content:center; width:28px; height:28px; font-family:Arial,sans-serif; font-size:8px; font-weight:900; letter-spacing:.4px; text-align:center;">${symbol}</span>`);
+    switch (rData.restaurantLogo) {
+      case 'COFFEE': return badge(icon(<Coffee size={24} color="#0f172a" />));
+      case 'PIZZA': return badge(icon(<Pizza size={24} color="#0f172a" />));
+      case 'FLAME': return badge(icon(<Flame size={24} color="#0f172a" />));
+      case 'BAR': return badge(icon(<Wine size={24} color="#0f172a" />));
+      default: return badge(icon(<Utensils size={24} color="#0f172a" />));
+    }
   };
 
   const renderReceiptHtmlForExport = (rData: ReceiptData): string => {
+    if (rData.type === 'PETROL' && rData.petrolFormat === 'STATION') {
+      const sp = rData.petrolDetails;
+      const rowsHtml = getStationRows(rData).map(([l, v]) => `
+        <div style="display:flex; align-items:baseline; margin:0 0 9px 0; line-height:1.25;">
+          <span style="width:92px; flex:0 0 92px; white-space:nowrap;">${l}</span>
+          <span style="flex:0 0 12px;">:</span>
+          <span style="flex:1; min-width:0; overflow-wrap:anywhere; padding-left:4px;">${escapeHtml(v)}</span>
+        </div>`).join('');
+      return `
+        <div style="width:100%; color:#000000; font-family:monospace; font-size:13px; font-weight:900; text-shadow:0.45px 0 0 #000000; box-sizing:border-box; background-color:#ffffff;">
+          ${getPetrolLogoHtmlForPdf(sp)}
+          <div style="text-transform:uppercase; font-size:14px; line-height:1.3; margin:6px 0 14px 0; overflow-wrap:anywhere;">
+            <div>${escapeHtml(rData.companyName || '')}</div>
+            ${sp?.dealerLine ? `<div>${escapeHtml(sp.dealerLine)}</div>` : ''}
+            <div>${escapeHtml(rData.address || '')}</div>
+          </div>
+          ${rowsHtml}
+          <div style="text-align:center; margin-top:22px; margin-bottom:8px; font-size:12px; text-transform:uppercase;">Thank You! Visit Again</div>
+        </div>
+      `;
+    }
     if (rData.type === 'PETROL') {
       const p = rData.petrolDetails;
       const petrolRow = (label: string, value: string) => `
@@ -415,31 +481,31 @@ export default function App() {
           <span style="white-space:nowrap;">${label}</span><span style="text-align:right; overflow-wrap:anywhere; word-break:break-word;">${value}</span>
         </div>`;
       return `
-        <div style="width:100%; color:#111827; font-family:monospace; font-size:12px; font-weight:900; box-sizing:border-box; background-color:#ffffff;">
+        <div style="width:100%; color:#000000; text-shadow:0.45px 0 0 #000000; font-family:monospace; font-size:13px; font-weight:900; box-sizing:border-box; background-color:#ffffff;">
           ${getPetrolLogoHtmlForPdf(p)}
-          <div style="text-align: center; font-weight: 900; font-size: 12px; margin-bottom: 8px; margin-top: 4px;">WELCOME!!!</div>
-          <div style="text-align: center; font-size: 11px; margin-bottom: 8px; line-height: 1.2; font-weight: 900; text-transform: uppercase;">${(rData.companyName || '').toUpperCase()}</div>
-          <div style="text-align: center; font-size: 10px; margin-bottom: 16px; line-height: 1.2;">${rData.address || ''}</div>
+          <div style="text-align: center; font-weight: 900; font-size:13px; margin-bottom: 8px; margin-top: 4px;">WELCOME!!!</div>
+          <div style="text-align: center; font-size:12px; margin-bottom: 8px; line-height: 1.2; font-weight: 900; text-transform: uppercase;">${(rData.companyName || '').toUpperCase()}</div>
+          <div style="text-align: center; font-size:11px; margin-bottom: 16px; line-height: 1.2;">${rData.address || ''}</div>
           
-          <div style="font-size:11px; margin:0 0 14px 0; border-top:1px dashed #9ca3af; border-bottom:1px dashed #9ca3af; padding:10px 0 7px 0;">
+          <div style="font-size:12px; margin:0 0 14px 0; border-top:1px dashed #9ca3af; border-bottom:1px dashed #9ca3af; padding:10px 0 7px 0;">
             ${petrolRow('TEL NO:', p?.telNo || '')}
             ${petrolRow('RECEIPT NO:', p?.receiptNo || '')}
             ${petrolRow('FCC ID:', p?.fccId || 'N/A')}
             ${petrolRow('FIP NO:', p?.fipNo || 'N/A')}
             ${petrolRow('NOZZLE NO:', p?.nozzleNo || 'N/A')}
           </div>
-          <div style="font-size:12px; margin:0 0 14px 0; padding:10px 0 6px 0; border-bottom:1px dashed #9ca3af; font-weight:900;">
+          <div style="font-size:13px; margin:0 0 14px 0; padding:10px 0 6px 0; border-bottom:1px dashed #9ca3af; font-weight:900;">
             ${petrolRow('PRODUCT:', p?.product || '')}
             ${petrolRow('RATE/LTR:', (p?.ratePerLtr || 0).toFixed(2))}
             ${petrolRow('AMOUNT:', `₹${(p?.amount || 0).toFixed(2)}`)}
             ${petrolRow('VOLUME(LTR):', `${(p?.volumeLtr || 0).toFixed(2)} lt`)}
           </div>
-          <div style="font-size:11px; margin-bottom:14px;">
+          <div style="font-size:12px; margin-bottom:14px;">
             ${petrolRow('VEH TYPE:', p?.vehType || '')}
             ${petrolRow('VEH NO:', p?.vehicleNumber || '')}
             ${petrolRow('CUSTOMER:', p?.customerName || '')}
           </div>
-          <div style="font-size:11px; padding-top:10px; border-top:1px dashed #9ca3af;">
+          <div style="font-size:12px; padding-top:10px; border-top:1px dashed #9ca3af;">
             ${petrolRow('DATE:', `${rData.date || ''} ${rData.time || ''}`)}
             ${petrolRow('MODE:', rData.paymentMode || '')}
             ${petrolRow('VAT NO:', p?.vatNo || 'N/A')}
@@ -447,8 +513,8 @@ export default function App() {
           </div>
 
           <div style="text-align: center; margin-top: 24px; margin-bottom: 8px;">
-            <div style="font-weight: 900; font-size: 12px; text-transform: uppercase;">Thank You! Visit Again</div>
-            <div style="font-size: 8px; margin-top: 4px; font-weight: 700;">SAVE FUEL, SAVE MONEY, SAVE THE PLANET.</div>
+            <div style="font-weight: 900; font-size:13px; text-transform: uppercase;">Thank You! Visit Again</div>
+            <div style="font-size:8px; margin-top: 4px; font-weight: 700;">SAVE FUEL, SAVE MONEY, SAVE THE PLANET.</div>
           </div>
         </div>
       `;
@@ -469,7 +535,7 @@ export default function App() {
         ${getRestaurantLogoHtmlForPdf(rData)}
         <h1 style="font-size:${rData.type === 'RESTAURANT' ? '15px' : '14px'}; font-weight:900; text-align:center; margin-bottom:4px; line-height:1; text-transform:uppercase; color:#0f172a;">${rData.companyName || 'STORE'}</h1>
         <p style="text-align:center; font-size:10px; margin-bottom:6px; white-space:normal;">${rData.address || ''}</p>
-        ${rData.type === 'RESTAURANT' ? `<div style="text-align:center; font-size:8px; font-weight:900; letter-spacing:2px; margin-bottom:8px;">DINING • ORDER RECEIPT</div>` : ''}
+        ${rData.type === 'RESTAURANT' ? `<div style="text-align:center; font-size:8px; font-weight:900; letter-spacing:2px; margin-bottom:8px;">DINING • ORDER RECEIPT</div>` : `<div style="text-align:center; font-size:8px; font-weight:900; letter-spacing:2px; margin-bottom:8px;">RETAIL • TAX INVOICE</div>`}
         <div style="width:100%; height:1px; border-bottom:1px dashed #cbd5e1; margin:8px 0;"></div>
 
         <div style="width:100%; font-size:10px; padding:${rData.type === 'RESTAURANT' ? '7px 5px' : '0 4px'}; margin-bottom:6px; box-sizing:border-box; ${rData.type === 'RESTAURANT' ? 'background:#f8fafc; border:1px solid #cbd5e1; border-radius:5px;' : ''}">
@@ -504,7 +570,9 @@ export default function App() {
         </div>
 
         <div style="width: 100%; height: 1px; border-bottom: 1px dashed #cbd5e1; margin: 16px 0 12px 0;"></div>
-        <p style="text-align: center; font-weight: 700; margin-top: 12px; text-transform: uppercase; font-size: 11px;">Thank You! Visit Again</p>
+        ${rData.type === 'RESTAURANT'
+          ? `<p style="text-align:center; font-weight:900; margin-top:12px; text-transform:uppercase; font-size:11px; letter-spacing:1px;">★ Thank you for dining ★</p><p style="text-align:center; font-size:9px; margin-top:2px;">We hope to serve you again</p>`
+          : `<p style="text-align:center; font-weight:700; margin-top:12px; text-transform:uppercase; font-size:11px;">Thank You! Visit Again</p><p style="text-align:center; font-size:8px; margin-top:3px;">Goods once sold will not be taken back</p>`}
       </div>
     `;
   };
@@ -541,6 +609,7 @@ export default function App() {
 
       await new Promise(resolve => setTimeout(resolve, 100));
       await waitForImagesToLoad(tempDiv);
+      await fitLogosToBoxes(tempDiv);
 
       const canvas = await html2canvas(tempDiv, {
         scale: 3,
@@ -749,6 +818,7 @@ export default function App() {
         container.style.boxShadow = 'none';
         
         await waitForImagesToLoad(container);
+        const restoreLogos = await fitLogosToBoxes(container);
         const canvas = await html2canvas(container, {
           scale: 2,
           useCORS: true,
@@ -757,6 +827,7 @@ export default function App() {
         });
         
         container.style.boxShadow = originalStyle;
+        restoreLogos();
         setData(originalData); // Restore original active tab/data
         
         const bytes = ThermalPrinter.canvasToCatPrinter(canvas);
@@ -774,7 +845,9 @@ export default function App() {
       chunks.push(cmds.ALIGN_CENTER);
       chunks.push(cmds.BOLD_ON);
 
-      if (adjusted.type === 'PETROL') {
+      if (adjusted.type === 'PETROL' && adjusted.petrolFormat === 'STATION') {
+        chunks.push(...buildStationEscPos(adjusted));
+      } else if (adjusted.type === 'PETROL') {
         chunks.push(cmds.BOLD_ON);
         chunks.push(cmds.TEXT_SIZE_LARGE);
         chunks.push(ThermalPrinter.textToUint8("WELCOME!!!"));
@@ -975,6 +1048,12 @@ export default function App() {
           spread: 70,
           origin: { y: 0.6 }
         });
+      } else {
+        // connect() reports failure by returning false; previously this was
+        // silent, so the user saw nothing when the printer would not connect.
+        setBluetoothConnectionError(newPrinter.lastError || 'Could not connect to the printer. Make sure it is switched on and Bluetooth is enabled.');
+        setIsPrinterConnected(false);
+        setPrinter(null);
       }
     } catch (err: any) {
       console.error(err);
@@ -1069,6 +1148,7 @@ export default function App() {
         container.style.boxShadow = 'none';
         
         await waitForImagesToLoad(container);
+        const restoreLogos = await fitLogosToBoxes(container);
         const canvas = await html2canvas(container, {
           scale: 2,
           useCORS: true,
@@ -1077,6 +1157,7 @@ export default function App() {
         });
         
         container.style.boxShadow = originalStyle;
+        restoreLogos();
         
         const bytes = ThermalPrinter.canvasToCatPrinter(canvas);
         await printer.print(bytes);
@@ -1097,7 +1178,9 @@ export default function App() {
       chunks.push(cmds.ALIGN_CENTER);
       chunks.push(cmds.BOLD_ON);
 
-      if (data.type === 'PETROL') {
+      if (data.type === 'PETROL' && data.petrolFormat === 'STATION') {
+        chunks.push(...buildStationEscPos(data));
+      } else if (data.type === 'PETROL') {
         chunks.push(cmds.BOLD_ON);
         chunks.push(cmds.TEXT_SIZE_LARGE);
         chunks.push(ThermalPrinter.textToUint8("WELCOME!!!"));
@@ -1196,6 +1279,23 @@ export default function App() {
       alert("Printing failed. See console for details.");
     }
   };
+
+  const renderPetrolLogo = () => (
+    <div className="w-44 h-36 flex items-center justify-center">
+      {data.petrolDetails?.company === 'CUSTOM' ? (
+        data.petrolDetails?.customLogoUrl ? (
+          <img
+            src={data.petrolDetails.customLogoUrl}
+            alt="Custom Station Logo"
+            className="max-w-[176px] max-h-[144px] object-contain select-none"
+            referrerPolicy="no-referrer"
+          />
+        ) : null
+      ) : (
+        PETROL_LOGOS[data.petrolDetails?.company || 'JIO_BP']
+      )}
+    </div>
+  );
 
   if (isSecurityEnabled && !isAuthenticated) {
     return (
@@ -1569,6 +1669,24 @@ export default function App() {
                 )}
                  {activeTab === 'PETROL' && (
                   <div className="space-y-4">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 block">Bill Format</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {([['CLASSIC', 'Classic Slip'], ['STATION', 'Station Slip']] as const).map(([fmt, label]) => (
+                        <button
+                          key={fmt}
+                          type="button"
+                          onClick={() => setData(prev => ({ ...prev, petrolFormat: fmt }))}
+                          className={`py-2 rounded-xl text-xs font-black uppercase tracking-wider border cursor-pointer transition-all ${
+                            (data.petrolFormat || 'CLASSIC') === fmt
+                              ? 'bg-emerald-500 text-slate-950 border-emerald-500'
+                              : 'bg-slate-50 text-slate-500 border-slate-100 hover:bg-slate-100'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+
                     <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 block">Petrol Company</label>
                     <div className="grid grid-cols-4 gap-2">
                       {(['JIO_BP', 'HP', 'BHARAT_PETROLEUM', 'INDIAN_OIL', 'NAYARA', 'ESSAR', 'CUSTOM'] as PetrolCompany[]).map(co => {
@@ -1781,6 +1899,31 @@ export default function App() {
                          />
                        </div>
                     </div>
+
+                    {data.petrolFormat === 'STATION' && (
+                      <div className="grid grid-cols-2 gap-3 p-3 rounded-2xl bg-emerald-50/60 border border-emerald-100">
+                        <div className="col-span-2">
+                          <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 block">Dealer Line</label>
+                          <input type="text" placeholder="DEALERS:-HPCL" value={data.petrolDetails?.dealerLine || ''} onChange={(e) => setData({...data, petrolDetails: {...data.petrolDetails!, dealerLine: e.target.value}})} className="w-full px-4 py-2 bg-white border-none rounded-xl focus:ring-2 focus:ring-emerald-500 text-xs" />
+                        </div>
+                      <div>
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 block">Trns.ID</label>
+                        <input type="text" placeholder="" value={data.petrolDetails?.transactionId || ''} onChange={(e) => setData({...data, petrolDetails: {...data.petrolDetails!, transactionId: e.target.value}})} className="w-full px-4 py-2 bg-white border-none rounded-xl focus:ring-2 focus:ring-emerald-500 text-xs" />
+                      </div>
+                      <div>
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 block">FP ID</label>
+                        <input type="text" placeholder="1" value={data.petrolDetails?.fpId || ''} onChange={(e) => setData({...data, petrolDetails: {...data.petrolDetails!, fpId: e.target.value}})} className="w-full px-4 py-2 bg-white border-none rounded-xl focus:ring-2 focus:ring-emerald-500 text-xs" />
+                      </div>
+                      <div>
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 block">Density</label>
+                        <input type="text" placeholder="835.7kg/m3" value={data.petrolDetails?.density || ''} onChange={(e) => setData({...data, petrolDetails: {...data.petrolDetails!, density: e.target.value}})} className="w-full px-4 py-2 bg-white border-none rounded-xl focus:ring-2 focus:ring-emerald-500 text-xs" />
+                      </div>
+                      <div>
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 block">Preset</label>
+                        <input type="text" placeholder="NON PRESET" value={data.petrolDetails?.preset || ''} onChange={(e) => setData({...data, petrolDetails: {...data.petrolDetails!, preset: e.target.value}})} className="w-full px-4 py-2 bg-white border-none rounded-xl focus:ring-2 focus:ring-emerald-500 text-xs" />
+                      </div>
+                      </div>
+                    )}
 
                     <div className="grid grid-cols-4 gap-2">
                        <div>
@@ -2215,8 +2358,29 @@ export default function App() {
                
               {/* Receipt Content -> Strictly 2 inches width emulation */}
               <div id="receipt-paper-container" className="receipt-paper font-mono text-[11px] leading-tight text-slate-800 antialiased mx-auto flex flex-col items-center bg-white px-4 py-6 w-[288px]">
-                {activeTab === 'PETROL' ? (
-                  <div className="w-full font-black text-[12px] leading-tight">
+                {activeTab === 'PETROL' && data.petrolFormat === 'STATION' ? (
+                  <div className="w-full font-black text-black petrol-dense text-[13px] leading-tight">
+                    <div className="flex flex-col items-center mb-3 mt-2 w-full">
+                      {renderPetrolLogo()}
+                    </div>
+                    <div className="uppercase text-[14px] leading-snug break-words mb-4 tracking-wide">
+                      <div>{data.companyName}</div>
+                      {data.petrolDetails?.dealerLine && <div>{data.petrolDetails.dealerLine}</div>}
+                      <div>{data.address}</div>
+                    </div>
+                    <div className="space-y-2.5">
+                      {getStationRows(data).map(([label, value]) => (
+                        <div key={label} className="flex items-baseline">
+                          <span className="w-[92px] shrink-0 whitespace-nowrap">{label}</span>
+                          <span className="w-[12px] shrink-0">:</span>
+                          <span className="flex-1 min-w-0 pl-1 break-words">{value}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="text-center mt-6 mb-3 text-[12px] uppercase">Thank You! Visit Again</div>
+                  </div>
+                ) : activeTab === 'PETROL' ? (
+                  <div className="w-full font-black text-black petrol-dense text-[13px] leading-tight">
                     <div className="flex flex-col items-center mb-5 mt-3 min-h-[145px] justify-center w-full">
                       <div className="w-44 h-44 flex items-center justify-center">
                         {data.petrolDetails?.company === 'CUSTOM' ? (
@@ -2241,12 +2405,12 @@ export default function App() {
                       </div>
                     </div>
                     
-                    <div className="text-center font-black text-[14px] mb-2">WELCOME!!!</div>
+                    <div className="text-center font-black text-[15px] mb-2">WELCOME!!!</div>
                     
-                    <div className="text-center text-[13px] mb-4 leading-tight font-black">{data.companyName.toUpperCase()}</div>
-                    <div className="text-center text-[11px] mb-4 leading-tight font-bold">{data.address}</div>
+                    <div className="text-center text-[14px] mb-4 leading-tight font-black">{data.companyName.toUpperCase()}</div>
+                    <div className="text-center text-[12px] mb-4 leading-tight font-bold">{data.address}</div>
                     
-                    <div className="text-[11px] space-y-2 mb-5 font-black">
+                    <div className="text-[12px] space-y-2.5 mb-5 font-black">
                       <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline"><span>TEL NO:</span> <span className="text-right break-words">{data.petrolDetails?.telNo}</span></div>
                       <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline"><span>RECEIPT NO:</span> <span className="text-right break-words">{data.petrolDetails?.receiptNo}</span></div>
                       <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline"><span>FCC ID:</span> <span className="text-right break-words">{data.petrolDetails?.fccId || 'N/A'}</span></div>
@@ -2254,20 +2418,20 @@ export default function App() {
                       <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline"><span>NOZZLE NO:</span> <span className="text-right break-words">{data.petrolDetails?.nozzleNo || 'N/A'}</span></div>
                     </div>
 
-                    <div className="text-[12px] space-y-2.5 mt-3 mb-5 py-4 border-y border-dashed border-slate-300 font-black">
+                    <div className="text-[13px] space-y-3 mt-3 mb-5 py-4 border-y border-dashed border-slate-300 font-black">
                       <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline uppercase"><span>PRODUCT:</span> <span className="text-right break-words">{data.petrolDetails?.product}</span></div>
                       <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline uppercase"><span>RATE/LTR:</span> <span className="text-right break-words">{data.petrolDetails?.ratePerLtr.toFixed(2)}</span></div>
                       <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline uppercase"><span>AMOUNT:</span> <span className="text-right break-words">₹{data.petrolDetails?.amount.toFixed(2)}</span></div>
                       <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline uppercase"><span>VOLUME(LTR):</span> <span className="text-right break-words">{data.petrolDetails?.volumeLtr.toFixed(2)} lt</span></div>
                     </div>
 
-                    <div className="text-[11px] space-y-2 mb-5 font-black">
+                    <div className="text-[12px] space-y-2.5 mb-5 font-black">
                       <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline uppercase"><span>VEH TYPE:</span> <span className="text-right break-words">{data.petrolDetails?.vehType}</span></div>
                       <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline uppercase"><span>VEH NO:</span> <span className="text-right break-words">{data.petrolDetails?.vehicleNumber}</span></div>
                       <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline uppercase"><span>CUSTOMER:</span> <span className="max-w-[120px] text-right">{data.petrolDetails?.customerName || ''}</span></div>
                     </div>
 
-                    <div className="text-[11px] space-y-2 pt-2 font-black">
+                    <div className="text-[12px] space-y-2 pt-2 font-black">
                       <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline uppercase"><span>DATE:</span> <span className="text-right break-words">{data.date} {data.time}</span></div>
                       <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline uppercase"><span>MODE:</span> <span className="text-right break-words">{data.paymentMode}</span></div>
                       <div className="grid grid-cols-[48%_52%] gap-x-1 items-baseline uppercase"><span>VAT NO:</span> <span className="text-right break-words">{data.petrolDetails?.vatNo || 'N/A'}</span></div>
@@ -2276,7 +2440,7 @@ export default function App() {
 
                     <div className="flex flex-col items-center mt-12 mb-4">
                       <div className="mb-2 tracking-widest text-slate-300">******************</div>
-                      <div className="font-black text-[13px] uppercase">Thank You! Visit Again</div>
+                      <div className="font-black text-[14px] uppercase">Thank You! Visit Again</div>
                       <div className="text-[9px] mt-1 font-bold">SAVE FUEL, SAVE MONEY, SAVE THE PLANET.</div>
                     </div>
                   </div>
@@ -2284,7 +2448,7 @@ export default function App() {
                   <>
                     {/* Logo Area */}
                     {data.type === 'RESTAURANT' && data.restaurantLogo !== 'NONE' && (
-                      <div className="mb-4 border-2 border-slate-900 rounded-full p-2 flex items-center justify-center">
+                      <div className="mb-4 w-[52px] h-[52px] min-w-[52px] min-h-[52px] shrink-0 box-border border-2 border-slate-900 rounded-full flex items-center justify-center overflow-hidden leading-none">
                         {(!data.restaurantLogo || data.restaurantLogo === 'UTENSILS') && <Utensils className="w-6 h-6 text-slate-900" />}
                         {data.restaurantLogo === 'COFFEE' && <Coffee className="w-6 h-6 text-slate-900" />}
                         {data.restaurantLogo === 'PIZZA' && <Pizza className="w-6 h-6 text-slate-900" />}
@@ -2292,7 +2456,7 @@ export default function App() {
                         {data.restaurantLogo === 'BAR' && <Wine className="w-6 h-6 text-slate-900" />}
                         {data.restaurantLogo === 'CUSTOM' && (
                           data.restaurantCustomLogoUrl ? (
-                            <img src={data.restaurantCustomLogoUrl} className="w-8 h-8 object-contain" referrerPolicy="no-referrer" alt="Custom Logo" />
+                            <img src={data.restaurantCustomLogoUrl} width={32} height={32} data-fit-box="32x32" className="block w-8 h-8 min-w-[32px] min-h-[32px] max-w-none object-contain shrink-0" referrerPolicy="no-referrer" alt="Custom Logo" />
                           ) : (
                             <Utensils className="w-6 h-6 text-slate-900" />
                           )
@@ -2302,8 +2466,10 @@ export default function App() {
 
                     <h1 className={`text-center font-black mb-1 leading-none uppercase ${data.type === 'RESTAURANT' ? 'text-[15px] tracking-tight' : 'text-base'}`}>{data.companyName}</h1>
                     <p className="text-center text-[10px] whitespace-normal mb-2 max-w-[210px]">{data.address}</p>
-                    {data.type === 'RESTAURANT' && (
+                    {data.type === 'RESTAURANT' ? (
                       <div className="text-center text-[8px] font-black tracking-[0.22em] uppercase mb-2">DINING • ORDER RECEIPT</div>
+                    ) : (
+                      <div className="text-center text-[8px] font-black tracking-[0.22em] uppercase mb-2">RETAIL • TAX INVOICE</div>
                     )}
                     <div className="w-full h-[1px] border-b border-dashed border-slate-300 my-2"></div>
                     
@@ -2371,7 +2537,17 @@ export default function App() {
                       </div>
                     )}
 
-                    <p className="text-center font-bold mt-4 uppercase">Thank You! Visit Again</p>
+                    {data.type === 'RESTAURANT' ? (
+                      <>
+                        <p className="text-center font-black mt-4 uppercase tracking-wider">★ Thank you for dining ★</p>
+                        <p className="text-center text-[9px] mt-0.5">We hope to serve you again</p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-center font-bold mt-4 uppercase">Thank You! Visit Again</p>
+                        <p className="text-center text-[8px] mt-1">Goods once sold will not be taken back</p>
+                      </>
+                    )}
                   </>
                 )}
                 <div className="mt-8 opacity-20 transform scale-y-50">----------------------------</div>
@@ -2471,7 +2647,21 @@ export default function App() {
                 {/* Emulated 2-inch Thermal Receipt */}
                 <div className="bg-white text-slate-900 p-4 rounded-xl shadow-2xl scale-[0.92] sm:scale-100 origin-top">
                   <div className="receipt-paper font-mono text-[11px] leading-tight text-slate-800 antialiased mx-auto flex flex-col items-center bg-white px-3 py-4 w-[288px]">
-                    {activeTab === 'PETROL' ? (
+                    {activeTab === 'PETROL' && data.petrolFormat === 'STATION' ? (
+                      <div className="w-full font-black text-left text-xs">
+                        <p className="font-black text-sm mb-1 uppercase">{data.companyName || 'PETROL PUMP'}</p>
+                        <p className="text-[10px] mb-3 uppercase">{data.address}</p>
+                        <div className="space-y-1 text-[11px]">
+                          {getStationRows(data).map(([label, value]) => (
+                            <div key={label} className="flex items-baseline">
+                              <span className="w-[72px] shrink-0">{label}</span>
+                              <span className="w-[10px] shrink-0">:</span>
+                              <span className="flex-1 min-w-0 break-words">{value}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : activeTab === 'PETROL' ? (
                       <div className="w-full font-black text-center text-xs">
                         <p className="font-bold text-sm mb-1">{data.companyName || 'PETROL PUMP'}</p>
                         <p className="text-[10px] text-slate-600 mb-3">{data.address}</p>
@@ -3271,6 +3461,11 @@ export default function App() {
           font-size: ${data.fontSize === 'small' ? '9px' : data.fontSize === 'medium' ? '11px' : '13px'};
           font-weight: ${activeTab === 'PETROL' || data.fontStyle === 'bold' ? '700' : '400'};
           letter-spacing: ${data.fontStyle === 'condensed' ? '-0.5px' : 'normal'};
+        }
+        /* Thicker, denser glyphs for petrol slips (Courier Prime has no weight above 700) */
+        .petrol-dense, .petrol-dense * {
+          color: #000 !important;
+          text-shadow: 0.45px 0 0 #000;
         }
         .cursor-edit {
           border-bottom: 1px dashed transparent;
