@@ -130,7 +130,28 @@ export class ThermalPrinter {
 
   private async connectNative(customServiceUuid?: string, customCharUuid?: string): Promise<boolean> {
     try {
-      await BleClient.initialize({ androidNeverForLocation: true });
+      // Do not use androidNeverForLocation here. Android 12+ can otherwise
+      // suppress some BLE advertisements. SC03H printers are small BLE
+      // peripherals and must be discoverable by a normal BLE scan.
+      await BleClient.initialize();
+
+      // Android BLE discovery can return no devices when Location Services
+      // are disabled (this is especially common on Android 11/12 devices).
+      // Check it explicitly before scanning and open the system setting so the
+      // user can enable it, then continue with the scan.
+      if (Capacitor.getPlatform() === 'android') {
+        try {
+          const locationEnabled = await BleClient.isLocationEnabled();
+          if (!locationEnabled) {
+            await BleClient.openLocationSettings();
+            throw new Error('Location Services are OFF. Please turn Location ON, then press Search Printer again.');
+          }
+        } catch (locationError: any) {
+          if (locationError?.message?.includes('Location Services are OFF')) throw locationError;
+          // Some Android builds do not expose this check reliably. Continue
+          // with the BLE scan rather than blocking printer discovery.
+        }
+      }
       // Some Android BLE stacks keep a stale GATT connection. Explicitly
       // disconnecting first makes reconnecting to small cat printers much
       // more reliable.
@@ -167,11 +188,23 @@ export class ThermalPrinter {
           try {
             await BleClient.requestLEScan(
               {
+                // IMPORTANT: no services/name filter. SC03H units may omit
+                // their service UUID and may report the name only as the
+                // advertisement localName.
                 allowDuplicates: false,
                 allowExtendedAdvertising: true,
               },
               (result) => {
                 const name = (result.device?.name || result.localName || '').trim();
+                console.log('BLE scan result:', {
+                  id: result.device?.deviceId,
+                  name,
+                  localName: result.localName,
+                  rssi: result.rssi,
+                });
+
+                // The user's printer is SC03h-842D. Match the complete SC03H
+                // family, not one hard-coded suffix.
                 if (/^SC03H(?:[-_].*)?$/i.test(name)) {
                   void BleClient.stopLEScan().catch(() => undefined);
                   finish({ deviceId: result.device.deviceId, name });
@@ -182,14 +215,16 @@ export class ThermalPrinter {
             setTimeout(() => {
               void BleClient.stopLEScan().catch(() => undefined);
               finish(null);
-            }, 7000);
-          } catch {
+            }, 12000);
+          } catch (scanError) {
+            console.error('BLE scan failed:', scanError);
             try { await BleClient.stopLEScan(); } catch { /* ignore */ }
             finish(null);
           }
         });
         if (scanResult) device = scanResult;
-      } catch {
+      } catch (scanError) {
+        console.error('SC03H scan error:', scanError);
         // Fall through to the native device picker.
       }
 

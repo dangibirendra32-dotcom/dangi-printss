@@ -57,3 +57,17 @@ if you're troubleshooting a specific printer.
   For a Play Store release, a signed release build would be needed instead.
 - Leftover `app-debug.apk` files under `public/` and `APK_DOWNLOAD/` are not
   used by the app or this workflow — safe to ignore or delete.
+
+## SC03H printer discovery
+
+The ROCKTECH printer shown by the user advertises as `SC03h-842D`. The SC03H
+family is a BLE cat-printer family using the AE30/AE01 protocol. Dangi Print
+therefore scans without a service filter and matches the `SC03h-*` local name.
+
+On Android, keep **Bluetooth ON** and **Location Services ON** while searching.
+The Capacitor BLE documentation notes that Android can return no BLE devices
+when Location Services are disabled. The app now checks this before scanning
+and opens Android Location settings when necessary.
+
+If the printer is already connected to another phone/tablet, disconnect it
+there first and then press **Search Printer** in Dangi Print.

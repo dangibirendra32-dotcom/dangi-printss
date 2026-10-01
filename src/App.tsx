@@ -974,7 +974,10 @@ export default function App() {
       }
     } catch (err: any) {
       console.error(err);
-      setBluetoothConnectionError(err.message || String(err));
+      const message = err?.message || String(err);
+      setBluetoothConnectionError(
+        message || 'Printer not found. Turn on SC03h-842D, keep it disconnected from other phones, enable Bluetooth and Location Services, then search again.'
+      );
       setIsPrinterConnected(false);
       setPrinter(null);
     }
