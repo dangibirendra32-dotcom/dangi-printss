@@ -136,14 +136,21 @@ export class ThermalPrinter {
       // more reliable.
 
 
-      const optionalServices = [...CAT_PRINTER_SERVICE_UUIDS, ...ThermalPrinter.KNOWN_SERVICES];
-      if (customServiceUuid && !optionalServices.includes(customServiceUuid)) {
-        optionalServices.push(customServiceUuid);
-      }
+      // On Android, requestDevice() filters using `services`; `optionalServices`
+      // is primarily a Web Bluetooth permission mechanism. The previous build
+      // passed an empty `services` array, which caused many Cat printers to be
+      // absent from the Android picker. Use the printer services as the native
+      // scan filter and include the common printer services as fallbacks.
+      const scanServices = [...new Set([
+        ...CAT_PRINTER_SERVICE_UUIDS,
+        ...ThermalPrinter.KNOWN_SERVICES,
+        ...(customServiceUuid ? [customServiceUuid] : []),
+      ])];
 
       const device = await BleClient.requestDevice({
-        services: [],
-        optionalServices,
+        services: scanServices,
+        optionalServices: scanServices,
+        allowExtendedAdvertising: true,
       });
 
       try { await BleClient.disconnect(device.deviceId); } catch { /* not connected */ }
@@ -246,10 +253,11 @@ export class ThermalPrinter {
 
   private async connectWeb(customServiceUuid?: string, customCharUuid?: string): Promise<boolean> {
     try {
-      const optionalServices = [...CAT_PRINTER_SERVICE_UUIDS, ...ThermalPrinter.KNOWN_SERVICES];
-      if (customServiceUuid && !optionalServices.includes(customServiceUuid)) {
-        optionalServices.push(customServiceUuid);
-      }
+      const optionalServices = [...new Set([
+        ...CAT_PRINTER_SERVICE_UUIDS,
+        ...ThermalPrinter.KNOWN_SERVICES,
+        ...(customServiceUuid ? [customServiceUuid] : []),
+      ])];
 
       this.device = await navigator.bluetooth.requestDevice({
         acceptAllDevices: true,

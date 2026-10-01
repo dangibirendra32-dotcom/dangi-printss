@@ -416,15 +416,15 @@ export default function App() {
     if (rData.type === 'PETROL') {
       const p = rData.petrolDetails;
       if (p?.format === 'NEW_HP') {
-        const row = (label: string, value: string, bold = false) => `<div style="display:grid;grid-template-columns:45% 55%;column-gap:8px;align-items:baseline;margin:0 0 6px 0;line-height:1.25;${bold ? 'font-weight:900;' : ''}"><span>${label}</span><span style="text-align:right;overflow-wrap:anywhere;word-break:break-word;">${value}</span></div>`;
+        const row = (label: string, value: string, bold = false) => `<div style="display:grid;grid-template-columns:max-content minmax(0,1fr);column-gap:8px;align-items:baseline;margin:0 0 4px 0;line-height:1.18;${bold ? 'font-weight:900;' : ''}"><span style="white-space:nowrap;">${label}</span><span style="text-align:left;overflow-wrap:anywhere;word-break:break-word;">${value}</span></div>`;
         return `
           <div style="width:100%;color:#111827;font-family:monospace;font-size:12px;font-weight:800;box-sizing:border-box;background:#fff;">
             ${getPetrolLogoHtmlForPdf(p)}
             <div style="text-align:center;font-size:13px;font-weight:900;text-transform:uppercase;line-height:1.1;">${(rData.companyName || '').toUpperCase()}</div>
             <div style="text-align:center;font-size:10px;font-weight:900;margin-top:3px;">DEALERS:- ${p?.dealerName || 'HPCL'}</div>
             <div style="text-align:center;font-size:10px;font-weight:900;margin-top:3px;line-height:1.2;">${rData.address || ''}</div>
-            <div style="margin:10px 0 9px;border-top:2px solid #111827;border-bottom:2px solid #111827;padding:8px 0 4px;">
-              ${row('B1TT NO:', rData.billNumber || p.receiptNo || '')}
+            <div style="margin:9px 0 8px;padding:0;">
+              ${row('BILL NO:', rData.billNumber || p.receiptNo || '')}
               ${row('Trns. ID:', p.transactionId || '')}
               ${row('Atnd. ID:', p.attendantId || '')}
               ${row('Vehi. No:', p.vehicleNumber || '')}
@@ -441,7 +441,7 @@ export default function App() {
               ${row('Sale', `Rs.${(p.amount || 0).toFixed(2)}`, true)}
               ${row('Volume', `${(p.volumeLtr || 0).toFixed(2)} Lts.`, true)}
             </div>
-            <div style="text-align:center;margin-top:18px;border-top:1px dashed #9ca3af;padding-top:8px;">
+            <div style="text-align:center;margin-top:10px;padding-top:0;">
               <div style="font-size:10px;font-weight:900;text-transform:uppercase;">Thank You! Visit Again</div>
               <div style="font-size:8px;margin-top:4px;font-weight:700;">SAVE FUEL, SAVE MONEY, SAVE THE PLANET.</div>
             </div>
@@ -748,8 +748,7 @@ export default function App() {
           chunks.push(ThermalPrinter.textToUint8(`DEALERS:- ${p?.dealerName || 'HPCL'}`));
           chunks.push(ThermalPrinter.textToUint8(adjusted.address));
           chunks.push(cmds.ALIGN_LEFT);
-          chunks.push(ThermalPrinter.textToUint8('--------------------------------'));
-          chunks.push(ThermalPrinter.textToUint8(`B1TT NO: ${adjusted.billNumber || p.receiptNo || ''}`));
+          chunks.push(ThermalPrinter.textToUint8(`BILL NO: ${adjusted.billNumber || p.receiptNo || ''}`));
           chunks.push(ThermalPrinter.textToUint8(`Trns. ID: ${p.transactionId || ''}`));
           chunks.push(ThermalPrinter.textToUint8(`Atnd. ID: ${p.attendantId || ''}`));
           chunks.push(ThermalPrinter.textToUint8(`Vehi. No: ${p.vehicleNumber || ''}`));
@@ -757,7 +756,6 @@ export default function App() {
           chunks.push(ThermalPrinter.textToUint8(`Time    : ${adjusted.time}`));
           chunks.push(ThermalPrinter.textToUint8(`FP. ID  : ${p.fipNo || ''}`));
           chunks.push(ThermalPrinter.textToUint8(`Nozl. No: ${p.nozzleNo || ''}`));
-          chunks.push(ThermalPrinter.textToUint8('--------------------------------'));
           chunks.push(ThermalPrinter.textToUint8(`Fuel    : ${p.product || 'Petrol'}`));
           chunks.push(ThermalPrinter.textToUint8(`Density : ${(p.density ?? 835.7).toFixed(1)} kg/m3`));
           chunks.push(ThermalPrinter.textToUint8(`Preset  : ${p.preset || 'NON PRESET'}`));
@@ -1080,8 +1078,7 @@ export default function App() {
           chunks.push(ThermalPrinter.textToUint8(`DEALERS:- ${p?.dealerName || 'HPCL'}`));
           chunks.push(ThermalPrinter.textToUint8(data.address));
           chunks.push(cmds.ALIGN_LEFT);
-          chunks.push(ThermalPrinter.textToUint8('--------------------------------'));
-          chunks.push(ThermalPrinter.textToUint8(`B1TT NO: ${data.billNumber || p.receiptNo || ''}`));
+          chunks.push(ThermalPrinter.textToUint8(`BILL NO: ${data.billNumber || p.receiptNo || ''}`));
           chunks.push(ThermalPrinter.textToUint8(`Trns. ID: ${p.transactionId || ''}`));
           chunks.push(ThermalPrinter.textToUint8(`Atnd. ID: ${p.attendantId || ''}`));
           chunks.push(ThermalPrinter.textToUint8(`Vehi. No: ${p.vehicleNumber || ''}`));
@@ -1089,7 +1086,6 @@ export default function App() {
           chunks.push(ThermalPrinter.textToUint8(`Time    : ${data.time}`));
           chunks.push(ThermalPrinter.textToUint8(`FP. ID  : ${p.fipNo || ''}`));
           chunks.push(ThermalPrinter.textToUint8(`Nozl. No: ${p.nozzleNo || ''}`));
-          chunks.push(ThermalPrinter.textToUint8('--------------------------------'));
           chunks.push(ThermalPrinter.textToUint8(`Fuel    : ${p.product || 'Petrol'}`));
           chunks.push(ThermalPrinter.textToUint8(`Density : ${(p.density ?? 835.7).toFixed(1)} kg/m3`));
           chunks.push(ThermalPrinter.textToUint8(`Preset  : ${p.preset || 'NON PRESET'}`));
@@ -2267,9 +2263,9 @@ export default function App() {
                         <div className="text-center font-black text-[13px] uppercase leading-tight">{data.companyName}</div>
                         <div className="text-center font-black text-[10px] uppercase mt-1">DEALERS:- {data.petrolDetails?.dealerName || 'HPCL'}</div>
                         <div className="text-center font-black text-[10px] mt-1 leading-tight">{data.address}</div>
-                        <div className="mt-3 mb-3 border-y-2 border-slate-900 py-2 space-y-1.5">
+                        <div className="mt-2 mb-2 space-y-1">
                           {[
-                            ['B1TT NO:', data.billNumber || data.petrolDetails?.receiptNo || ''],
+                            ['BILL NO:', data.billNumber || data.petrolDetails?.receiptNo || ''],
                             ['Trns. ID:', data.petrolDetails?.transactionId || ''],
                             ['Atnd. ID:', data.petrolDetails?.attendantId || ''],
                             ['Vehi. No:', data.petrolDetails?.vehicleNumber || ''],
@@ -2278,20 +2274,20 @@ export default function App() {
                             ['FP. ID', data.petrolDetails?.fipNo || ''],
                             ['Nozl. No:', data.petrolDetails?.nozzleNo || ''],
                           ].map(([label, value]) => (
-                            <div key={label} className="grid grid-cols-[45%_55%] gap-x-2 items-baseline">
-                              <span>{label}</span><span className="text-right break-words">{value}</span>
+                            <div key={label} className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-2 items-baseline">
+                              <span className="whitespace-nowrap">{label}</span><span className="break-words text-left">{value}</span>
                             </div>
                           ))}
                         </div>
-                        <div className="space-y-1.5 text-[12px]">
-                          <div className="grid grid-cols-[45%_55%] gap-x-2"><span>Fuel</span><span className="text-right">{data.petrolDetails?.product || 'Petrol'}</span></div>
-                          <div className="grid grid-cols-[45%_55%] gap-x-2"><span>Density</span><span className="text-right">{(data.petrolDetails?.density ?? 835.7).toFixed(1)} kg/m3</span></div>
-                          <div className="grid grid-cols-[45%_55%] gap-x-2"><span>Preset</span><span className="text-right">{data.petrolDetails?.preset || 'NON PRESET'}</span></div>
-                          <div className="grid grid-cols-[45%_55%] gap-x-2 font-black"><span>Rate</span><span className="text-right">Rs.{data.petrolDetails?.ratePerLtr.toFixed(2)}</span></div>
-                          <div className="grid grid-cols-[45%_55%] gap-x-2 font-black"><span>Sale</span><span className="text-right">Rs.{data.petrolDetails?.amount.toFixed(2)}</span></div>
-                          <div className="grid grid-cols-[45%_55%] gap-x-2 font-black"><span>Volume</span><span className="text-right">{data.petrolDetails?.volumeLtr.toFixed(2)} Lts.</span></div>
+                        <div className="space-y-1 text-[12px]">
+                          <div className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-2"><span className="whitespace-nowrap">Fuel</span><span className="text-left">{data.petrolDetails?.product || 'Petrol'}</span></div>
+                          <div className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-2"><span className="whitespace-nowrap">Density</span><span className="text-left">{(data.petrolDetails?.density ?? 835.7).toFixed(1)} kg/m3</span></div>
+                          <div className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-2"><span className="whitespace-nowrap">Preset</span><span className="text-left">{data.petrolDetails?.preset || 'NON PRESET'}</span></div>
+                          <div className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-2 font-black"><span className="whitespace-nowrap">Rate</span><span className="text-left">Rs.{data.petrolDetails?.ratePerLtr.toFixed(2)}</span></div>
+                          <div className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-2 font-black"><span className="whitespace-nowrap">Sale</span><span className="text-left">Rs.{data.petrolDetails?.amount.toFixed(2)}</span></div>
+                          <div className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-2 font-black"><span className="whitespace-nowrap">Volume</span><span className="text-left">{data.petrolDetails?.volumeLtr.toFixed(2)} Lts.</span></div>
                         </div>
-                        <div className="mt-5 pt-2 border-t border-dashed border-slate-400 text-center">
+                        <div className="mt-3 pt-0 text-center">
                           <div className="font-black text-[10px] uppercase">Thank You! Visit Again</div>
                           <div className="text-[8px] mt-1 font-bold">SAVE FUEL, SAVE MONEY, SAVE THE PLANET.</div>
                         </div>
