@@ -70,3 +70,9 @@
 - A half-open GATT link is disconnected if service/characteristic setup fails, so the next attempt starts clean.
 - Each BLE write retries once using the other write type; a mid-print disconnect now gives a clear error.
 - UI now flips back to "disconnected" when the printer drops the link.
+
+## Print quality fix (2026-10-01, v7)
+- Printed receipts were faint/speckled. Cause: the receipt was captured at 576px, downscaled to 384 dots, then Floyd-Steinberg dithered, so grey text became sparse dots.
+- Receipt is now captured at exactly 384/288 scale (no resampling) for CatPrinter prints.
+- All text/borders are forced to pure black for printing.
+- Dithering + dilation replaced by a plain threshold (185) so text is solid and crisp.

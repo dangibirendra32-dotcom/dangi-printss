@@ -215,54 +215,27 @@ export function canvasToCatPrinterRows(canvas: HTMLCanvasElement): boolean[][] {
   const sctx = sourceCanvas.getContext('2d')!;
   const imgData = sctx.getImageData(0, 0, w, h).data;
 
-  // OPTIMIZATION 2: Use Floyd-Steinberg dithering instead of thresholding
-  
-  // First, convert to grayscale
   const grayscale: number[] = new Array(w * h);
   for (let i = 0; i < w * h; i++) {
     const idx = i * 4;
-    const r = imgData[idx];
-    const g = imgData[idx + 1];
-    const b = imgData[idx + 2];
     const a = imgData[idx + 3];
-    if (a > 60) {
-      // Weighted grayscale conversion (better than simple average)
-      grayscale[i] = 0.299 * r + 0.587 * g + 0.114 * b;
-    } else {
-      grayscale[i] = 255; // Transparent -> white
-    }
+    grayscale[i] = a > 60
+      ? 0.299 * imgData[idx] + 0.587 * imgData[idx + 1] + 0.114 * imgData[idx + 2]
+      : 255; // transparent -> white
   }
 
-  // Apply Floyd-Steinberg dithering
-  const dithered = floydSteinbergDither(grayscale, w, h);
-  
-  // OPTIMIZATION 3: Minimal dilation (only 1 pass, not 3)
+  // Thermal paper is strictly black/white. Floyd-Steinberg dithering turned
+  // anti-aliased text into faint scattered dots, so use a plain threshold:
+  // anything darker than THRESHOLD becomes a solid black dot. Text stays crisp
+  // and dark; no extra dilation (it made small text blobby).
+  const THRESHOLD = 185;
   const rows: boolean[][] = [];
   for (let y = 0; y < h; y++) {
-    const row: boolean[] = new Array(w).fill(false);
+    const row: boolean[] = new Array(w);
     for (let x = 0; x < w; x++) {
-      row[x] = dithered[y * w + x];
+      row[x] = grayscale[y * w + x] < THRESHOLD;
     }
     rows.push(row);
   }
-
-  // Single small dilation pass (not 3 passes or 7x thickening)
-  const dilated = rows.map(row => [...row]);
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      if (!rows[y][x]) continue;
-      // Only 1 pixel dilation in all 8 directions (not 3 pixels)
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          const ny = y + dy;
-          const nx = x + dx;
-          if (ny >= 0 && ny < h && nx >= 0 && nx < w) {
-            dilated[ny][nx] = true;
-          }
-        }
-      }
-    }
-  }
-
-  return dilated;
+  return rows;
 }

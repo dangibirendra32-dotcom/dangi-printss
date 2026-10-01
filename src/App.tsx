@@ -553,7 +553,12 @@ export default function App() {
     `;
   };
 
-  const captureReceiptCanvas = async (rData: ReceiptData, scale = 2): Promise<HTMLCanvasElement> => {
+  // Receipt DOM is 288px wide; the Cat printer head is 384 dots wide. Capturing at
+  // exactly 384/288 means the bitmap needs NO resampling before printing, which
+  // is what used to turn the text into faint grey speckle.
+  const PRINT_SCALE = 384 / 288;
+
+  const captureReceiptCanvas = async (rData: ReceiptData, scale = 2, forPrint = false): Promise<HTMLCanvasElement> => {
     const tempDiv = document.createElement('div');
     tempDiv.style.position = 'fixed';
     tempDiv.style.top = '-10000px';
@@ -565,6 +570,14 @@ export default function App() {
     tempDiv.style.boxSizing = 'border-box';
     tempDiv.style.fontFamily = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
     tempDiv.innerHTML = renderReceiptHtmlForExport(rData);
+    if (forPrint) {
+      // Thermal paper only has black or white: force every grey text/border
+      // colour to pure black so nothing gets lost when converting to 1-bit.
+      const st = document.createElement('style');
+      st.textContent = '*{color:#000 !important;border-color:#000 !important;}';
+      tempDiv.prepend(st);
+      tempDiv.style.color = '#000000';
+    }
     document.body.appendChild(tempDiv);
     try {
       await new Promise(resolve => setTimeout(resolve, 60));
@@ -729,7 +742,7 @@ export default function App() {
       if (printer.getPrinterType() === 'catprinter') {
         // Capture the same dependency-free inline receipt renderer used by PDF
         // export. This avoids Android WebView/Tailwind CSS rendering issues.
-        const canvas = await captureReceiptCanvas(adjusted, 2);
+        const canvas = await captureReceiptCanvas(adjusted, PRINT_SCALE, true);
         const bytes = ThermalPrinter.canvasToCatPrinter(canvas, printer.getCatPrinterEnergy());
         await printer.print(bytes);
         setShowQuickReprintModal(false);
@@ -1071,7 +1084,7 @@ export default function App() {
 
     try {
       if (printer.getPrinterType() === 'catprinter') {
-        const canvas = await captureReceiptCanvas(data, 2);
+        const canvas = await captureReceiptCanvas(data, PRINT_SCALE, true);
         const bytes = ThermalPrinter.canvasToCatPrinter(canvas, printer.getCatPrinterEnergy());
         await printer.print(bytes);
         saveToHistory();
