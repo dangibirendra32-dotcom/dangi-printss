@@ -61,3 +61,12 @@
 - NEW petrol ESC/POS text output now uses a compact fixed 9-character description column so printed values align consistently.
 - Identified the user's printer as the SC03H family from the Bluetooth name `SC03h-842D`. SC03H is a known cat-printer BLE family; Dangi Print now performs a BLE scan first and automatically selects an SC03H device before falling back to the normal device picker.
 - Native Android BLE connection now explicitly requests GATT service discovery after connecting, improving service detection on Android versions where `getServices()` can otherwise return an empty list.
+
+## Printer connection fix (2026-10-01, v6)
+- Connection failures were silent: `connect()` swallowed every error and returned `false`, and the UI ignored a `false` result. The real reason (Location off, permission denied, timeout, no service) is now stored in `printer.lastError` and shown in the Bluetooth error box.
+- MTU bug: the BLE plugin reports MTU `-1` when MTU negotiation fails, and the old code then fell back to 128-byte writes on a 23-byte-MTU link (20 usable bytes), so printers dropped or truncated data. Unknown/failed MTU is now treated as 23 and chunks are capped to MTU-3.
+- Default write chunk lowered 128 -> 64 bytes (matches the settings that worked in earlier testing). Saved custom values are kept.
+- Scan is stopped (awaited) before connecting; scan timeout 12s -> 8s and the timer is cleared once a printer is found.
+- A half-open GATT link is disconnected if service/characteristic setup fails, so the next attempt starts clean.
+- Each BLE write retries once using the other write type; a mid-print disconnect now gives a clear error.
+- UI now flips back to "disconnected" when the printer drops the link.

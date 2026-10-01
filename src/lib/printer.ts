@@ -39,12 +39,18 @@ export class ThermalPrinter {
   private nativeMtu: number | null = null;
 
   private printerType: PrinterType = 'escpos';
+
+  // Human-readable reason for the last failed connect() so the UI can show it
+  // (connect() returns false instead of throwing).
+  public lastError: string = '';
+  // Called when the native BLE link drops after a successful connection.
+  public onDisconnected: (() => void) | null = null;
   
   // Energy level for cat printers - adjustable
   private catPrinterEnergy: number = DEFAULT_ENERGY;
 
   // Configuration options
-  public chunkSize: number = 128;
+  public chunkSize: number = 64;
   public delayMs: number = 20;
   public forceWriteWithResponse: boolean = false;
   public useCrLf: boolean = false;
@@ -73,6 +79,14 @@ export class ThermalPrinter {
   private static isCatPrinterService(uuid: string): boolean {
     const u = uuid.toLowerCase();
     return CAT_PRINTER_SERVICE_UUIDS.some(catUuid => catUuid.toLowerCase() === u);
+  }
+
+  private static describeError(error: any): string {
+    const msg = String(error?.message || error || '').trim();
+    if (/cancel|dismiss|NotFoundError/i.test(msg)) return 'No printer was selected.';
+    if (/permission|denied/i.test(msg)) return 'Bluetooth permission was denied. Allow "Nearby devices" (and Location) for Dangi Print in Android Settings, then try again.';
+    if (/timeout|timed out/i.test(msg)) return 'Connection timed out. Switch the printer off and on, make sure no other phone is connected to it, then search again.';
+    return msg || 'Could not connect to the printer.';
   }
 
   // Method to set energy level for cat printers
@@ -129,6 +143,8 @@ export class ThermalPrinter {
   }
 
   private async connectNative(customServiceUuid?: string, customCharUuid?: string): Promise<boolean> {
+    this.lastError = '';
+    let connectedId: string | null = null;
     try {
       // Do not use androidNeverForLocation here. Android 12+ can otherwise
       // suppress some BLE advertisements. SC03H printers are small BLE
@@ -179,9 +195,11 @@ export class ThermalPrinter {
       try {
         const scanResult = await new Promise<{ deviceId: string; name?: string } | null>(async (resolve) => {
           let settled = false;
+          let timer: ReturnType<typeof setTimeout> | undefined;
           const finish = (found: { deviceId: string; name?: string } | null) => {
             if (settled) return;
             settled = true;
+            if (timer) clearTimeout(timer);
             resolve(found);
           };
 
@@ -206,16 +224,20 @@ export class ThermalPrinter {
                 // The user's printer is SC03h-842D. Match the complete SC03H
                 // family, not one hard-coded suffix.
                 if (/^SC03H(?:[-_].*)?$/i.test(name)) {
-                  void BleClient.stopLEScan().catch(() => undefined);
-                  finish({ deviceId: result.device.deviceId, name });
+                  // Stop the scan BEFORE connecting; connecting while a scan
+                  // is still running makes Android GATT connects flaky.
+                  BleClient.stopLEScan()
+                    .catch(() => undefined)
+                    .then(() => finish({ deviceId: result.device.deviceId, name }));
                 }
               }
             );
 
-            setTimeout(() => {
-              void BleClient.stopLEScan().catch(() => undefined);
-              finish(null);
-            }, 12000);
+            timer = setTimeout(() => {
+              BleClient.stopLEScan()
+                .catch(() => undefined)
+                .then(() => finish(null));
+            }, 8000);
           } catch (scanError) {
             console.error('BLE scan failed:', scanError);
             try { await BleClient.stopLEScan(); } catch { /* ignore */ }
@@ -241,7 +263,11 @@ export class ThermalPrinter {
         this.nativeServiceUuid = null;
         this.nativeCharUuid = null;
         this.nativeMtu = null;
+        this.connectedServiceUuid = '';
+        this.connectedCharacteristicUuid = '';
+        try { this.onDisconnected?.(); } catch { /* ignore UI callback errors */ }
       });
+      connectedId = device.deviceId;
 
       // Some Android versions need an explicit GATT discovery after a BLE
       // scan before getServices() returns the printer's database.
@@ -250,11 +276,14 @@ export class ThermalPrinter {
       this.availableServices = services.map(s => s.uuid);
 
       try {
-        this.nativeMtu = await BleClient.getMtu(device.deviceId);
-        console.log(`BLE MTU: ${this.nativeMtu}, max write payload: ${Math.max(20, this.nativeMtu - 3)} bytes`);
+        const mtu = await BleClient.getMtu(device.deviceId);
+        // The plugin reports -1 when MTU negotiation failed; the link is then
+        // still at the BLE default of 23 (20 usable bytes per write).
+        this.nativeMtu = mtu > 3 ? mtu : 23;
       } catch {
-        this.nativeMtu = null;
+        this.nativeMtu = 23;
       }
+      console.log(`BLE MTU: ${this.nativeMtu}, max write payload: ${this.nativeMtu - 3} bytes`);
 
       this.printerType = /^SC03H(?:[-_].*)?$/i.test(device.name || '') ? 'catprinter' : 'escpos';
       let matchedService: (typeof services)[number] | undefined;
@@ -330,13 +359,22 @@ export class ThermalPrinter {
       this.connectedCharacteristicUuid = characteristic.uuid;
 
       return true;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Native Bluetooth connection failed:', error);
+      this.lastError = ThermalPrinter.describeError(error);
+      // Don't leave a half-open GATT link behind; it blocks the next attempt.
+      if (connectedId) {
+        try { await BleClient.disconnect(connectedId); } catch { /* ignore */ }
+      }
+      this.nativeDeviceId = null;
+      this.nativeServiceUuid = null;
+      this.nativeCharUuid = null;
       return false;
     }
   }
 
   private async connectWeb(customServiceUuid?: string, customCharUuid?: string): Promise<boolean> {
+    this.lastError = '';
     try {
       const optionalServices = [...new Set([
         ...CAT_PRINTER_SERVICE_UUIDS,
@@ -451,8 +489,9 @@ export class ThermalPrinter {
       this.connectedCharacteristicUuid = this.characteristic.uuid;
 
       return true;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Bluetooth connection failed:', error);
+      this.lastError = ThermalPrinter.describeError(error);
       return false;
     }
   }
@@ -550,8 +589,9 @@ export class ThermalPrinter {
       console.log(`Printing with energy: ${this.catPrinterEnergy.toString(16)}`);
     }
 
-    const configuredChunkSize = this.chunkSize || 128;
-    const mtuLimitedChunkSize = this.nativeMtu && this.nativeMtu > 3 ? Math.max(20, this.nativeMtu - 3) : configuredChunkSize;
+    const configuredChunkSize = this.chunkSize || 64;
+    // Unknown MTU on native => assume the BLE default (23 => 20-byte payload).
+    const mtuLimitedChunkSize = Math.max(20, (this.nativeMtu && this.nativeMtu > 3 ? this.nativeMtu : 23) - 3);
     const chunkSize = isNative ? Math.min(configuredChunkSize, mtuLimitedChunkSize) : configuredChunkSize;
     const interChunkDelayMs = this.delayMs || 20;
 
@@ -559,11 +599,26 @@ export class ThermalPrinter {
       const chunk = outgoing.slice(i, i + chunkSize);
 
       if (isNative) {
+        if (!this.nativeDeviceId || !this.nativeServiceUuid || !this.nativeCharUuid) {
+          throw new Error('Printer disconnected while printing. Reconnect and print again.');
+        }
         const dv = numbersToDataView(Array.from(chunk));
-        if (this.nativeWriteWithoutResponse && !this.forceWriteWithResponse) {
-          await BleClient.writeWithoutResponse(this.nativeDeviceId!, this.nativeServiceUuid!, this.nativeCharUuid!, dv);
-        } else {
-          await BleClient.write(this.nativeDeviceId!, this.nativeServiceUuid!, this.nativeCharUuid!, dv);
+        const preferNoResponse = this.nativeWriteWithoutResponse && !this.forceWriteWithResponse;
+        try {
+          if (preferNoResponse) {
+            await BleClient.writeWithoutResponse(this.nativeDeviceId, this.nativeServiceUuid, this.nativeCharUuid, dv);
+          } else {
+            await BleClient.write(this.nativeDeviceId, this.nativeServiceUuid, this.nativeCharUuid, dv);
+          }
+        } catch (writeError) {
+          // One retry after a short pause, using the other write type.
+          await new Promise(resolve => setTimeout(resolve, 60));
+          if (!this.nativeDeviceId) throw writeError;
+          if (preferNoResponse) {
+            await BleClient.write(this.nativeDeviceId, this.nativeServiceUuid!, this.nativeCharUuid!, dv);
+          } else {
+            await BleClient.writeWithoutResponse(this.nativeDeviceId, this.nativeServiceUuid!, this.nativeCharUuid!, dv);
+          }
         }
       } else if (this.characteristic) {
         if (this.forceWriteWithResponse && typeof this.characteristic.writeValueWithResponse === 'function') {

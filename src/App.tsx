@@ -143,7 +143,7 @@ export default function App() {
   const [bluetoothConnectionError, setBluetoothConnectionError] = useState<string>('');
 
   const [bleChunkSize, setBleChunkSize] = useState<number>(() => {
-    return Number(localStorage.getItem('dangi_ble_chunk_size')) || 128;
+    return Number(localStorage.getItem('dangi_ble_chunk_size')) || 64;
   });
   const [bleDelayMs, setBleDelayMs] = useState<number>(() => {
     const saved = localStorage.getItem('dangi_ble_delay_ms');
@@ -940,6 +940,11 @@ export default function App() {
       newPrinter.forceWriteWithResponse = bleForceWriteWithResponse;
       newPrinter.useCrLf = bleUseCrLf;
       newPrinter.sendCutCommand = bleSendCutCommand;
+      newPrinter.onDisconnected = () => {
+        setIsPrinterConnected(false);
+        setPrinter(null);
+        setBluetoothConnectionError('Printer disconnected. Press Search Printer to reconnect.');
+      };
 
       const success = await newPrinter.connect(
         customServiceUuid ? customServiceUuid.trim() : undefined,
@@ -971,6 +976,13 @@ export default function App() {
           spread: 70,
           origin: { y: 0.6 }
         });
+      } else {
+        setIsPrinterConnected(false);
+        setPrinter(null);
+        setBluetoothConnectionError(
+          newPrinter.lastError ||
+          'Printer not found. Turn on the printer (e.g. SC03h-xxxx), keep it disconnected from other phones, enable Bluetooth and Location Services, then search again.'
+        );
       }
     } catch (err: any) {
       console.error(err);
