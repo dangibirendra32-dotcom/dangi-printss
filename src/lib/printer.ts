@@ -148,10 +148,57 @@ export class ThermalPrinter {
         ...(customServiceUuid ? [customServiceUuid] : []),
       ])];
 
-      const device = await BleClient.requestDevice({
-        optionalServices,
-        allowExtendedAdvertising: true,
-      });
+      // SC03H is the exact printer family reported by the user's device
+      // (for example SC03h-842D). These printers are documented as BLE cat
+      // printers using the AE30/AE01 family, but Android's requestDevice()
+      // picker can fail to show them even when the phone's Bluetooth scanner
+      // can see them. Use a real BLE scan first and select an SC03H device
+      // directly; if it is not found, fall back to the normal picker.
+      let device: { deviceId: string; name?: string } | null = null;
+      try {
+        const scanResult = await new Promise<{ deviceId: string; name?: string } | null>(async (resolve) => {
+          let settled = false;
+          const finish = (found: { deviceId: string; name?: string } | null) => {
+            if (settled) return;
+            settled = true;
+            resolve(found);
+          };
+
+          try {
+            await BleClient.requestLEScan(
+              {
+                allowDuplicates: false,
+                allowExtendedAdvertising: true,
+              },
+              (result) => {
+                const name = (result.device?.name || result.localName || '').trim();
+                if (/^SC03H(?:[-_].*)?$/i.test(name)) {
+                  void BleClient.stopLEScan().catch(() => undefined);
+                  finish({ deviceId: result.device.deviceId, name });
+                }
+              }
+            );
+
+            setTimeout(() => {
+              void BleClient.stopLEScan().catch(() => undefined);
+              finish(null);
+            }, 7000);
+          } catch {
+            try { await BleClient.stopLEScan(); } catch { /* ignore */ }
+            finish(null);
+          }
+        });
+        if (scanResult) device = scanResult;
+      } catch {
+        // Fall through to the native device picker.
+      }
+
+      if (!device) {
+        device = await BleClient.requestDevice({
+          optionalServices,
+          allowExtendedAdvertising: true,
+        });
+      }
 
       try { await BleClient.disconnect(device.deviceId); } catch { /* not connected */ }
       await BleClient.connect(device.deviceId, () => {
@@ -161,6 +208,9 @@ export class ThermalPrinter {
         this.nativeMtu = null;
       });
 
+      // Some Android versions need an explicit GATT discovery after a BLE
+      // scan before getServices() returns the printer's database.
+      try { await BleClient.discoverServices(device.deviceId); } catch { /* Android may already have discovered them */ }
       const services = await BleClient.getServices(device.deviceId);
       this.availableServices = services.map(s => s.uuid);
 
@@ -171,7 +221,7 @@ export class ThermalPrinter {
         this.nativeMtu = null;
       }
 
-      this.printerType = 'escpos';
+      this.printerType = /^SC03H(?:[-_].*)?$/i.test(device.name || '') ? 'catprinter' : 'escpos';
       let matchedService: (typeof services)[number] | undefined;
 
       if (customServiceUuid) {

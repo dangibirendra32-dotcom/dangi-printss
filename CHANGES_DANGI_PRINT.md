@@ -54,3 +54,10 @@
 - Petrol format label changed from "New HP Format" to "New Format".
 - App branding is Dangi Print, including the HTML title.
 - Removed the visible `admin / admin` default-credentials text and removed hard-coded fallback credentials. If no credentials exist, the app starts unlocked so credentials can be created from Security settings.
+
+## Latest printer + petrol layout fix (2026-10-01)
+- NEW petrol format label/value columns tightened from 42/58 to 28/72 so values start much closer to their descriptions, matching the compact station-receipt layout.
+- NEW petrol PDF/export rows use the same tighter 28/72 column layout and reduced vertical spacing.
+- NEW petrol ESC/POS text output now uses a compact fixed 9-character description column so printed values align consistently.
+- Identified the user's printer as the SC03H family from the Bluetooth name `SC03h-842D`. SC03H is a known cat-printer BLE family; Dangi Print now performs a BLE scan first and automatically selects an SC03H device before falling back to the normal device picker.
+- Native Android BLE connection now explicitly requests GATT service discovery after connecting, improving service detection on Android versions where `getServices()` can otherwise return an empty list.
