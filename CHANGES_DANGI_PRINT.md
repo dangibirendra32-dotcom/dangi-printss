@@ -46,3 +46,11 @@
 - CatPrinter printing and quick reprint now capture the same inline renderer used by PDF export.
 - NEW_HP petrol format now has an editable Dealer Name field and an uploaded logo can override the selected company logo. The station/company name remains editable as before.
 - Fixed a duplicate Preset input in the NEW_HP petrol editor.
+
+## Latest fixes (Dangi Print)
+- Petrol New Format labels now use a colon on every description and a compact 42/58 description/value alignment.
+- New Format keeps the receipt as one continuous section without an internal horizontal divider.
+- Android Cat Printer selection no longer filters the BLE picker by advertised service UUID; many small Cat printers do not advertise their service UUID, so the user can select the printer and the app inspects its GATT services afterward.
+- Petrol format label changed from "New HP Format" to "New Format".
+- App branding is Dangi Print, including the HTML title.
+- Removed the visible `admin / admin` default-credentials text and removed hard-coded fallback credentials. If no credentials exist, the app starts unlocked so credentials can be created from Security settings.

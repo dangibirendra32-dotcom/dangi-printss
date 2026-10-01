@@ -204,11 +204,13 @@ export default function App() {
 
   // --- Secure Authentication State ---
   const [isSecurityEnabled, setIsSecurityEnabled] = useState<boolean>(() => {
-    return localStorage.getItem('tinyprint_security_enabled') !== 'false';
+    const hasCredentials = !!localStorage.getItem('tinyprint_username') && !!localStorage.getItem('tinyprint_password');
+    return hasCredentials && localStorage.getItem('tinyprint_security_enabled') !== 'false';
   });
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
     const sessionAuth = sessionStorage.getItem('tinyprint_authenticated') === 'true';
-    const isSecEnabled = localStorage.getItem('tinyprint_security_enabled') !== 'false';
+    const hasCredentials = !!localStorage.getItem('tinyprint_username') && !!localStorage.getItem('tinyprint_password');
+    const isSecEnabled = hasCredentials && localStorage.getItem('tinyprint_security_enabled') !== 'false';
     return !isSecEnabled || sessionAuth;
   });
   const [loginIdInput, setLoginIdInput] = useState<string>('');
@@ -225,8 +227,13 @@ export default function App() {
   // --- Secure Authentication Actions ---
   const handleLogin = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    const correctUser = localStorage.getItem('tinyprint_username') || 'admin';
-    const correctPass = localStorage.getItem('tinyprint_password') || 'admin';
+    const correctUser = localStorage.getItem('tinyprint_username');
+    const correctPass = localStorage.getItem('tinyprint_password');
+
+    if (!correctUser || !correctPass) {
+      setLoginError('No login credentials are configured. Open Security settings to create them.');
+      return;
+    }
 
     if (loginIdInput.trim() === correctUser && passwordInput === correctPass) {
       setIsAuthenticated(true);
@@ -240,7 +247,7 @@ export default function App() {
         origin: { y: 0.8 }
       });
     } else {
-      setLoginError('Invalid Login ID or Password. Default is admin / admin.');
+      setLoginError('Invalid Login ID or Password.');
     }
   };
 
@@ -416,7 +423,7 @@ export default function App() {
     if (rData.type === 'PETROL') {
       const p = rData.petrolDetails;
       if (p?.format === 'NEW_HP') {
-        const row = (label: string, value: string, bold = false) => `<div style="display:grid;grid-template-columns:max-content minmax(0,1fr);column-gap:8px;align-items:baseline;margin:0 0 4px 0;line-height:1.18;${bold ? 'font-weight:900;' : ''}"><span style="white-space:nowrap;">${label}</span><span style="text-align:left;overflow-wrap:anywhere;word-break:break-word;">${value}</span></div>`;
+        const row = (label: string, value: string, bold = false) => `<div style="display:grid;grid-template-columns:42% 58%;column-gap:0;align-items:baseline;margin:0 0 4px 0;line-height:1.18;${bold ? 'font-weight:900;' : ''}"><span style="white-space:nowrap;">${label}</span><span style="text-align:left;overflow-wrap:anywhere;word-break:break-word;">${value}</span></div>`;
         return `
           <div style="width:100%;color:#111827;font-family:monospace;font-size:12px;font-weight:800;box-sizing:border-box;background:#fff;">
             ${getPetrolLogoHtmlForPdf(p)}
@@ -428,18 +435,18 @@ export default function App() {
               ${row('Trns. ID:', p.transactionId || '')}
               ${row('Atnd. ID:', p.attendantId || '')}
               ${row('Vehi. No:', p.vehicleNumber || '')}
-              ${row('Date', rData.date || '')}
-              ${row('Time', rData.time || '')}
-              ${row('FP. ID', p.fipNo || '')}
+              ${row('Date:', rData.date || '')}
+              ${row('Time:', rData.time || '')}
+              ${row('FP. ID:', p.fipNo || '')}
               ${row('Nozl. No:', p.nozzleNo || '')}
             </div>
             <div style="font-size:12px;">
-              ${row('Fuel', p.product || 'Petrol')}
-              ${row('Density', `${(p.density ?? 835.7).toFixed(1)} kg/m3`)}
-              ${row('Preset', p.preset || 'NON PRESET')}
-              ${row('Rate', `Rs.${(p.ratePerLtr || 0).toFixed(2)}`, true)}
-              ${row('Sale', `Rs.${(p.amount || 0).toFixed(2)}`, true)}
-              ${row('Volume', `${(p.volumeLtr || 0).toFixed(2)} Lts.`, true)}
+              ${row('Fuel:', p.product || 'Petrol')}
+              ${row('Density:', `${(p.density ?? 835.7).toFixed(1)} kg/m3`)}
+              ${row('Preset:', p.preset || 'NON PRESET')}
+              ${row('Rate:', `Rs.${(p.ratePerLtr || 0).toFixed(2)}`, true)}
+              ${row('Sale:', `Rs.${(p.amount || 0).toFixed(2)}`, true)}
+              ${row('Volume:', `${(p.volumeLtr || 0).toFixed(2)} Lts.`, true)}
             </div>
             <div style="text-align:center;margin-top:10px;padding-top:0;">
               <div style="font-size:10px;font-weight:900;text-transform:uppercase;">Thank You! Visit Again</div>
@@ -752,16 +759,16 @@ export default function App() {
           chunks.push(ThermalPrinter.textToUint8(`Trns. ID: ${p.transactionId || ''}`));
           chunks.push(ThermalPrinter.textToUint8(`Atnd. ID: ${p.attendantId || ''}`));
           chunks.push(ThermalPrinter.textToUint8(`Vehi. No: ${p.vehicleNumber || ''}`));
-          chunks.push(ThermalPrinter.textToUint8(`Date    : ${adjusted.date}`));
-          chunks.push(ThermalPrinter.textToUint8(`Time    : ${adjusted.time}`));
-          chunks.push(ThermalPrinter.textToUint8(`FP. ID  : ${p.fipNo || ''}`));
+          chunks.push(ThermalPrinter.textToUint8(`Date: ${adjusted.date}`));
+          chunks.push(ThermalPrinter.textToUint8(`Time: ${adjusted.time}`));
+          chunks.push(ThermalPrinter.textToUint8(`FP. ID: ${p.fipNo || ''}`));
           chunks.push(ThermalPrinter.textToUint8(`Nozl. No: ${p.nozzleNo || ''}`));
-          chunks.push(ThermalPrinter.textToUint8(`Fuel    : ${p.product || 'Petrol'}`));
-          chunks.push(ThermalPrinter.textToUint8(`Density : ${(p.density ?? 835.7).toFixed(1)} kg/m3`));
-          chunks.push(ThermalPrinter.textToUint8(`Preset  : ${p.preset || 'NON PRESET'}`));
-          chunks.push(ThermalPrinter.textToUint8(`Rate    : Rs.${(p.ratePerLtr || 0).toFixed(2)}`));
-          chunks.push(ThermalPrinter.textToUint8(`Sale    : Rs.${(p.amount || 0).toFixed(2)}`));
-          chunks.push(ThermalPrinter.textToUint8(`Volume  : ${(p.volumeLtr || 0).toFixed(2)} Lts.`));
+          chunks.push(ThermalPrinter.textToUint8(`Fuel: ${p.product || 'Petrol'}`));
+          chunks.push(ThermalPrinter.textToUint8(`Density: ${(p.density ?? 835.7).toFixed(1)} kg/m3`));
+          chunks.push(ThermalPrinter.textToUint8(`Preset: ${p.preset || 'NON PRESET'}`));
+          chunks.push(ThermalPrinter.textToUint8(`Rate: Rs.${(p.ratePerLtr || 0).toFixed(2)}`));
+          chunks.push(ThermalPrinter.textToUint8(`Sale: Rs.${(p.amount || 0).toFixed(2)}`));
+          chunks.push(ThermalPrinter.textToUint8(`Volume: ${(p.volumeLtr || 0).toFixed(2)} Lts.`));
         } else {
           chunks.push(cmds.ALIGN_CENTER);
           chunks.push(cmds.TEXT_SIZE_LARGE);
@@ -1082,16 +1089,16 @@ export default function App() {
           chunks.push(ThermalPrinter.textToUint8(`Trns. ID: ${p.transactionId || ''}`));
           chunks.push(ThermalPrinter.textToUint8(`Atnd. ID: ${p.attendantId || ''}`));
           chunks.push(ThermalPrinter.textToUint8(`Vehi. No: ${p.vehicleNumber || ''}`));
-          chunks.push(ThermalPrinter.textToUint8(`Date    : ${data.date}`));
-          chunks.push(ThermalPrinter.textToUint8(`Time    : ${data.time}`));
-          chunks.push(ThermalPrinter.textToUint8(`FP. ID  : ${p.fipNo || ''}`));
+          chunks.push(ThermalPrinter.textToUint8(`Date: ${data.date}`));
+          chunks.push(ThermalPrinter.textToUint8(`Time: ${data.time}`));
+          chunks.push(ThermalPrinter.textToUint8(`FP. ID: ${p.fipNo || ''}`));
           chunks.push(ThermalPrinter.textToUint8(`Nozl. No: ${p.nozzleNo || ''}`));
-          chunks.push(ThermalPrinter.textToUint8(`Fuel    : ${p.product || 'Petrol'}`));
-          chunks.push(ThermalPrinter.textToUint8(`Density : ${(p.density ?? 835.7).toFixed(1)} kg/m3`));
-          chunks.push(ThermalPrinter.textToUint8(`Preset  : ${p.preset || 'NON PRESET'}`));
-          chunks.push(ThermalPrinter.textToUint8(`Rate    : Rs.${(p.ratePerLtr || 0).toFixed(2)}`));
-          chunks.push(ThermalPrinter.textToUint8(`Sale    : Rs.${(p.amount || 0).toFixed(2)}`));
-          chunks.push(ThermalPrinter.textToUint8(`Volume  : ${(p.volumeLtr || 0).toFixed(2)} Lts.`));
+          chunks.push(ThermalPrinter.textToUint8(`Fuel: ${p.product || 'Petrol'}`));
+          chunks.push(ThermalPrinter.textToUint8(`Density: ${(p.density ?? 835.7).toFixed(1)} kg/m3`));
+          chunks.push(ThermalPrinter.textToUint8(`Preset: ${p.preset || 'NON PRESET'}`));
+          chunks.push(ThermalPrinter.textToUint8(`Rate: Rs.${(p.ratePerLtr || 0).toFixed(2)}`));
+          chunks.push(ThermalPrinter.textToUint8(`Sale: Rs.${(p.amount || 0).toFixed(2)}`));
+          chunks.push(ThermalPrinter.textToUint8(`Volume: ${(p.volumeLtr || 0).toFixed(2)} Lts.`));
         } else {
           chunks.push(cmds.ALIGN_CENTER);
           chunks.push(cmds.TEXT_SIZE_LARGE);
@@ -1269,10 +1276,8 @@ export default function App() {
             </button>
           </form>
 
-          {/* Prompt standard login instructions */}
           <div className="mt-8 pt-6 border-t border-slate-100 text-center">
             <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Authorized Personnel Only</span>
-            <span className="text-[9px] text-slate-400 font-semibold block mt-1">Default credentials: <strong className="text-slate-600 font-bold">admin</strong> / <strong className="text-slate-600 font-bold">admin</strong></span>
           </div>
         </motion.div>
       </div>
@@ -1308,7 +1313,7 @@ export default function App() {
             )}
             <button 
               onClick={() => {
-                setNewLoginId(localStorage.getItem('tinyprint_username') || 'admin');
+                setNewLoginId(localStorage.getItem('tinyprint_username') || '');
                 setCredentialsChangeError('');
                 setCredentialsChangeSuccess('');
                 setShowChangeCredentialsModal(true);
@@ -1567,13 +1572,13 @@ export default function App() {
                       <div className="flex items-center justify-between gap-3 mb-2">
                         <div>
                           <label className="text-xs font-black text-slate-700 uppercase tracking-widest block">Petrol Bill Format</label>
-                          <p className="text-[10px] text-slate-500 mt-0.5">Choose the old receipt or the new HP-style service-station receipt.</p>
+                          <p className="text-[10px] text-slate-500 mt-0.5">Choose the old receipt or the new service-station receipt.</p>
                         </div>
                         <span className="text-[9px] font-black uppercase tracking-wider text-emerald-700 bg-white px-2 py-1 rounded-lg border border-emerald-100">{data.petrolDetails?.format === 'NEW_HP' ? 'NEW' : 'OLD'}</span>
                       </div>
                       <div className="grid grid-cols-2 gap-2 p-1 bg-white rounded-xl border border-emerald-100">
                         <button type="button" onClick={() => setData(prev => ({ ...prev, petrolDetails: { ...prev.petrolDetails!, format: 'OLD' } }))} className={`py-2.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all ${data.petrolDetails?.format !== 'NEW_HP' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}>Old Format</button>
-                        <button type="button" onClick={() => setData(prev => ({ ...prev, petrolDetails: { ...prev.petrolDetails!, format: 'NEW_HP' } }))} className={`py-2.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all ${data.petrolDetails?.format === 'NEW_HP' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}>New HP Format</button>
+                        <button type="button" onClick={() => setData(prev => ({ ...prev, petrolDetails: { ...prev.petrolDetails!, format: 'NEW_HP' } }))} className={`py-2.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all ${data.petrolDetails?.format === 'NEW_HP' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}>New Format</button>
                       </div>
                     </div>
 
@@ -2269,23 +2274,23 @@ export default function App() {
                             ['Trns. ID:', data.petrolDetails?.transactionId || ''],
                             ['Atnd. ID:', data.petrolDetails?.attendantId || ''],
                             ['Vehi. No:', data.petrolDetails?.vehicleNumber || ''],
-                            ['Date', data.date || ''],
-                            ['Time', data.time || ''],
-                            ['FP. ID', data.petrolDetails?.fipNo || ''],
+                            ['Date:', data.date || ''],
+                            ['Time:', data.time || ''],
+                            ['FP. ID:', data.petrolDetails?.fipNo || ''],
                             ['Nozl. No:', data.petrolDetails?.nozzleNo || ''],
                           ].map(([label, value]) => (
-                            <div key={label} className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-2 items-baseline">
+                            <div key={label} className="grid grid-cols-[42%_58%] items-baseline">
                               <span className="whitespace-nowrap">{label}</span><span className="break-words text-left">{value}</span>
                             </div>
                           ))}
                         </div>
                         <div className="space-y-1 text-[12px]">
-                          <div className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-2"><span className="whitespace-nowrap">Fuel</span><span className="text-left">{data.petrolDetails?.product || 'Petrol'}</span></div>
-                          <div className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-2"><span className="whitespace-nowrap">Density</span><span className="text-left">{(data.petrolDetails?.density ?? 835.7).toFixed(1)} kg/m3</span></div>
-                          <div className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-2"><span className="whitespace-nowrap">Preset</span><span className="text-left">{data.petrolDetails?.preset || 'NON PRESET'}</span></div>
-                          <div className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-2 font-black"><span className="whitespace-nowrap">Rate</span><span className="text-left">Rs.{data.petrolDetails?.ratePerLtr.toFixed(2)}</span></div>
-                          <div className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-2 font-black"><span className="whitespace-nowrap">Sale</span><span className="text-left">Rs.{data.petrolDetails?.amount.toFixed(2)}</span></div>
-                          <div className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-2 font-black"><span className="whitespace-nowrap">Volume</span><span className="text-left">{data.petrolDetails?.volumeLtr.toFixed(2)} Lts.</span></div>
+                          <div className="grid grid-cols-[42%_58%]"><span>Fuel:</span><span className="text-left">{data.petrolDetails?.product || 'Petrol'}</span></div>
+                          <div className="grid grid-cols-[42%_58%]"><span>Density:</span><span className="text-left">{(data.petrolDetails?.density ?? 835.7).toFixed(1)} kg/m3</span></div>
+                          <div className="grid grid-cols-[42%_58%]"><span>Preset:</span><span className="text-left">{data.petrolDetails?.preset || 'NON PRESET'}</span></div>
+                          <div className="grid grid-cols-[42%_58%] font-black"><span>Rate:</span><span className="text-left">Rs.{data.petrolDetails?.ratePerLtr.toFixed(2)}</span></div>
+                          <div className="grid grid-cols-[42%_58%] font-black"><span>Sale:</span><span className="text-left">Rs.{data.petrolDetails?.amount.toFixed(2)}</span></div>
+                          <div className="grid grid-cols-[42%_58%] font-black"><span>Volume:</span><span className="text-left">{data.petrolDetails?.volumeLtr.toFixed(2)} Lts.</span></div>
                         </div>
                         <div className="mt-3 pt-0 text-center">
                           <div className="font-black text-[10px] uppercase">Thank You! Visit Again</div>
@@ -3150,7 +3155,7 @@ export default function App() {
               )}
 
               <div className="text-[9px] text-slate-400 font-semibold leading-relaxed mt-4 pt-4 border-t border-slate-100 text-center uppercase tracking-wider">
-                Active Username: <strong className="text-slate-600 font-bold">{localStorage.getItem('tinyprint_username') || 'admin'}</strong>
+                Active Username: <strong className="text-slate-600 font-bold">{localStorage.getItem('tinyprint_username') || 'Not configured'}</strong>
               </div>
             </motion.div>
           </motion.div>

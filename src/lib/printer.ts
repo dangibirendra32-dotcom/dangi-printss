@@ -136,20 +136,20 @@ export class ThermalPrinter {
       // more reliable.
 
 
-      // On Android, requestDevice() filters using `services`; `optionalServices`
-      // is primarily a Web Bluetooth permission mechanism. The previous build
-      // passed an empty `services` array, which caused many Cat printers to be
-      // absent from the Android picker. Use the printer services as the native
-      // scan filter and include the common printer services as fallbacks.
-      const scanServices = [...new Set([
+      // Do not put printer UUIDs in the Android `services` filter here.
+      // Many small Cat printers advertise with no service UUID (or advertise a
+      // vendor-specific UUID), so a service filter can make them invisible.
+      // We scan the BLE picker broadly, then inspect GATT services after the
+      // user selects the printer. `optionalServices` keeps the known services
+      // available for Web Bluetooth/native GATT access.
+      const optionalServices = [...new Set([
         ...CAT_PRINTER_SERVICE_UUIDS,
         ...ThermalPrinter.KNOWN_SERVICES,
         ...(customServiceUuid ? [customServiceUuid] : []),
       ])];
 
       const device = await BleClient.requestDevice({
-        services: scanServices,
-        optionalServices: scanServices,
+        optionalServices,
         allowExtendedAdvertising: true,
       });
 
