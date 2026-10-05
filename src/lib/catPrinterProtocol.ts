@@ -116,8 +116,8 @@ function cmdPrintRow(row: boolean[]): number[] {
   return packet(CMD.PRINT_ROW_UNCOMPRESSED, rowToBitmapBytes(row));
 }
 
-// ENERGY_LEVELS: Different energy settings for cat printers
-// OPTIMIZATION 1: Reduced energy to prevent over-burning
+// ENERGY_LEVELS: Different heat/energy settings for SC03h cat printers.
+ // Maximum is the default because the requested output is bold and dark.
 export const ENERGY_LEVELS = {
   LOW: 0x8000,      // 50% - for very sensitive printers
   MEDIUM: 0xC000,   // 75% - for most printers
@@ -125,8 +125,9 @@ export const ENERGY_LEVELS = {
   MAXIMUM: 0xFFFF,  // 100% - Maximum energy (may over-burn)
 };
 
-// Default energy level - CHANGED from MAXIMUM to HIGH for better results
-export const DEFAULT_ENERGY = ENERGY_LEVELS.HIGH;
+// Default energy level: maximum head energy for darker, clearer SC03h prints.
+// The user can still select LOW/MEDIUM/HIGH if a particular paper is too dark.
+export const DEFAULT_ENERGY = ENERGY_LEVELS.MAXIMUM;
 
 export function buildCatPrinterImageCommands(rows: boolean[][], energy: number = DEFAULT_ENERGY): Uint8Array {
   const packets: number[][] = [
@@ -224,11 +225,12 @@ export function canvasToCatPrinterRows(canvas: HTMLCanvasElement): boolean[][] {
       : 255; // transparent -> white
   }
 
-  // Thermal paper is strictly black/white. Floyd-Steinberg dithering turned
-  // anti-aliased text into faint scattered dots, so use a plain threshold:
-  // anything darker than THRESHOLD becomes a solid black dot. Text stays crisp
-  // and dark; no extra dilation (it made small text blobby).
-  const THRESHOLD = 185;
+  // Use a strong threshold for the SC03h thermal head. A slightly higher
+  // threshold preserves the dark parts of anti-aliased text instead of
+  // throwing away edge pixels, which is a common cause of faded-looking
+  // receipts on mini thermal printers.
+  const THRESHOLD = 195;
+
   const rows: boolean[][] = [];
   for (let y = 0; y < h; y++) {
     const row: boolean[] = new Array(w);
@@ -237,5 +239,31 @@ export function canvasToCatPrinterRows(canvas: HTMLCanvasElement): boolean[][] {
     }
     rows.push(row);
   }
-  return rows;
+
+  // One-pixel 8-neighbour expansion makes normal receipt text visibly
+  // bolder/clearer after thermal conversion without using dithering.
+  // Keep the expansion to exactly one pass so small text and QR/barcode
+  // geometry are not excessively blurred.
+  const boldRows: boolean[][] = rows.map(row => row.slice());
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (rows[y][x]) continue;
+      let neighbourIsBlack = false;
+      for (let dy = -1; dy <= 1 && !neighbourIsBlack; dy++) {
+        const yy = y + dy;
+        if (yy < 0 || yy >= h) continue;
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          const xx = x + dx;
+          if (xx >= 0 && xx < w && rows[yy][xx]) {
+            neighbourIsBlack = true;
+            break;
+          }
+        }
+      }
+      if (neighbourIsBlack) boldRows[y][x] = true;
+    }
+  }
+
+  return boldRows;
 }
