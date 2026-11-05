@@ -96,3 +96,7 @@
 ## v11 - even darkness
 - Field test v10: darker, but bands of pale lines. Printer was running at its default speed with no speed command sent before the image.
 - Now sends speed (0xBD) before the image; new setting Print Speed (default Slow = 48). Higher = slower = darker/even.
+
+## v12 - preview matches print
+- On-screen preview (all bill types) now renders with the same HTML as the printer/PDF, so what you see is what prints.
+- Old-format petrol bill no longer prints the phone number twice.
