@@ -88,3 +88,7 @@
 - Side margins cut from 16px to 2px per side; restaurant/supermarket boxes with inner padding removed, so text uses the full paper width.
 - Default login seeded on first run: ID birendrad / password Birendra#123 (change in Security settings).
 - Print threshold 185 -> 205 so regular-weight text prints solid.
+
+## v10 - darker print (field test was too light)
+- Default print darkness is now Darkest (0xFFFF). Saved darkness setting was reset (new storage key) so old "Dark" value does not override it.
+- Bill text is bold; black/white cutoff raised 205 -> 220 so strokes print thicker.

@@ -151,7 +151,7 @@ export default function App() {
     return saved !== null ? Number(saved) : 20;
   });
   const [catEnergy, setCatEnergy] = useState<number>(() => {
-    const saved = Number(localStorage.getItem('dangi_cat_energy'));
+    const saved = Number(localStorage.getItem('dangi_cat_energy_v2'));
     return Object.values(ENERGY_LEVELS).includes(saved) ? saved : DEFAULT_ENERGY;
   });
   const [bleForceWriteWithResponse, setBleForceWriteWithResponse] = useState<boolean>(() => {
@@ -436,7 +436,7 @@ export default function App() {
     const MONO = `font-family:'Courier New',Courier,'Liberation Mono',monospace;color:#000;`;
     const esc = (v: unknown) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const preBlock = (lines: string[], size = 16) =>
-      `<pre style="${MONO}font-size:${size}px;font-weight:400;line-height:1.2;margin:0;padding:0 0 0 2px;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;">${lines.map(esc).join('\n')}</pre>`;
+      `<pre style="${MONO}font-size:${size}px;font-weight:700;line-height:1.2;margin:0;padding:0 0 0 2px;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;">${lines.map(esc).join('\n')}</pre>`;
     const field = (label: string, value: unknown, width = 7) => `${label.padEnd(width, ' ')}:${value ?? ''}`;
 
     if (rData.type === 'PETROL') {
@@ -2859,7 +2859,7 @@ export default function App() {
                       onChange={(e) => {
                         const v = Number(e.target.value);
                         setCatEnergy(v);
-                        localStorage.setItem('dangi_cat_energy', String(v));
+                        localStorage.setItem('dangi_cat_energy_v2', String(v));
                       }}
                       className="w-full bg-white text-slate-800 px-2.5 py-1.5 rounded-xl border border-slate-200 outline-none text-xs font-semibold cursor-pointer"
                     >

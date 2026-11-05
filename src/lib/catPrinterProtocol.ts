@@ -129,7 +129,7 @@ export const ENERGY_LEVELS = {
   MAXIMUM: 0xffff,  // 65535 - darkest (may smear / use more battery)
 };
 
-export const DEFAULT_ENERGY = ENERGY_LEVELS.HIGH;
+export const DEFAULT_ENERGY = ENERGY_LEVELS.MAXIMUM; // field test: HIGH (24000) printed too light
 
 export function buildCatPrinterImageCommands(rows: boolean[][], energy: number = DEFAULT_ENERGY): Uint8Array {
   const packets: number[][] = [
@@ -231,7 +231,7 @@ export function canvasToCatPrinterRows(canvas: HTMLCanvasElement): boolean[][] {
   // anti-aliased text into faint scattered dots, so use a plain threshold:
   // anything darker than THRESHOLD becomes a solid black dot. Text stays crisp
   // and dark; no extra dilation (it made small text blobby).
-  const THRESHOLD = 205;
+  const THRESHOLD = 220;
   const rows: boolean[][] = [];
   for (let y = 0; y < h; y++) {
     const row: boolean[] = new Array(w);
