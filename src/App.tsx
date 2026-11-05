@@ -51,7 +51,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { QRCodeSVG } from 'qrcode.react';
 import confetti from 'canvas-confetti';
 import html2canvas from 'html2canvas';
-import { ENERGY_LEVELS, DEFAULT_ENERGY } from './lib/catPrinterProtocol';
+import { ENERGY_LEVELS, DEFAULT_ENERGY, SPEED_LEVELS, DEFAULT_SPEED, setCatPrinterSpeed } from './lib/catPrinterProtocol';
 
 // Waits for every <img> inside a container to finish loading (or fail) before
 // resolving. html2canvas captures whatever is currently painted — if a
@@ -154,6 +154,12 @@ export default function App() {
     const saved = Number(localStorage.getItem('dangi_cat_energy_v2'));
     return Object.values(ENERGY_LEVELS).includes(saved) ? saved : DEFAULT_ENERGY;
   });
+  const [catSpeed, setCatSpeed] = useState<number>(() => {
+    const saved = localStorage.getItem('dangi_cat_speed');
+    const n = saved === null ? DEFAULT_SPEED : Number(saved);
+    return Object.values(SPEED_LEVELS).includes(n) ? n : DEFAULT_SPEED;
+  });
+  setCatPrinterSpeed(catSpeed);
   const [bleForceWriteWithResponse, setBleForceWriteWithResponse] = useState<boolean>(() => {
     return localStorage.getItem('dangi_ble_force_write') === 'true';
   });
@@ -2867,6 +2873,26 @@ export default function App() {
                       <option value={ENERGY_LEVELS.MEDIUM}>Medium</option>
                       <option value={ENERGY_LEVELS.HIGH}>Dark (Recommended)</option>
                       <option value={ENERGY_LEVELS.MAXIMUM}>Darkest</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">Print Speed (Cat Printer)</label>
+                    <select
+                      value={catSpeed}
+                      onChange={(e) => {
+                        const v = Number(e.target.value);
+                        setCatSpeed(v);
+                        setCatPrinterSpeed(v);
+                        localStorage.setItem('dangi_cat_speed', String(v));
+                      }}
+                      className="w-full bg-white text-slate-800 px-2.5 py-1.5 rounded-xl border border-slate-200 outline-none text-xs font-semibold cursor-pointer"
+                    >
+                      <option value={SPEED_LEVELS.AUTO}>Printer default</option>
+                      <option value={SPEED_LEVELS.NORMAL}>Normal</option>
+                      <option value={SPEED_LEVELS.SLOW}>Slow (Recommended)</option>
+                      <option value={SPEED_LEVELS.SLOWER}>Slower</option>
+                      <option value={SPEED_LEVELS.SLOWEST}>Slowest</option>
                     </select>
                   </div>
 

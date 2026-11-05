@@ -129,6 +129,13 @@ export const ENERGY_LEVELS = {
   MAXIMUM: 0xffff,  // 65535 - darkest (may smear / use more battery)
 };
 
+// Print speed (command 0xBD). Higher number = slower head movement = more heat per
+// line = darker and more even print. 0 = don't send (printer's own default).
+export const SPEED_LEVELS = { AUTO: 0, NORMAL: 32, SLOW: 48, SLOWER: 64, SLOWEST: 96 };
+export const DEFAULT_SPEED = SPEED_LEVELS.SLOW;
+let currentSpeed = DEFAULT_SPEED;
+export function setCatPrinterSpeed(speed: number) { currentSpeed = speed; }
+
 export const DEFAULT_ENERGY = ENERGY_LEVELS.MAXIMUM; // field test: HIGH (24000) printed too light
 
 export function buildCatPrinterImageCommands(rows: boolean[][], energy: number = DEFAULT_ENERGY): Uint8Array {
@@ -136,6 +143,7 @@ export function buildCatPrinterImageCommands(rows: boolean[][], energy: number =
     CMD_GET_DEV_STATE,
     CMD_SET_QUALITY_200_DPI,
     cmdSetEnergy(energy),
+    ...(currentSpeed > 0 ? [packet(CMD.FEED_PAPER, [currentSpeed & 0xff])] : []), // 0xBD = set speed
     cmdApplyEnergyOrPrintText(),
     CMD_LATTICE_START,
   ];

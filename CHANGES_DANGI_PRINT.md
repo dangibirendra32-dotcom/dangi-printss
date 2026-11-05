@@ -92,3 +92,7 @@
 ## v10 - darker print (field test was too light)
 - Default print darkness is now Darkest (0xFFFF). Saved darkness setting was reset (new storage key) so old "Dark" value does not override it.
 - Bill text is bold; black/white cutoff raised 205 -> 220 so strokes print thicker.
+
+## v11 - even darkness
+- Field test v10: darker, but bands of pale lines. Printer was running at its default speed with no speed command sent before the image.
+- Now sends speed (0xBD) before the image; new setting Print Speed (default Slow = 48). Higher = slower = darker/even.
