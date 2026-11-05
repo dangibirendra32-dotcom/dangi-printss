@@ -100,3 +100,9 @@
 ## v12 - preview matches print
 - On-screen preview (all bill types) now renders with the same HTML as the printer/PDF, so what you see is what prints.
 - Old-format petrol bill no longer prints the phone number twice.
+
+## v13
+- Old-format petrol bill: label left / value right-aligned with dashed section lines, WELCOME!!!, like the app preview.
+- Restaurant bill: boxed, "=" rules, "DINING - ORDER RECEIPT", ORDER DETAILS, two-line items, "Enjoy your meal!".
+- Super Mart bill: "TAX INVOICE", "-" rules, one-line item table (ITEM QTY RATE AMT), Items/Qty count, "Thank You For Shopping!".
+- Tax line is printed when taxAmount > 0.

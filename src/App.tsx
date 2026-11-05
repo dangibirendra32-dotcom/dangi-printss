@@ -450,6 +450,39 @@ export default function App() {
       const head: string[] = [(rData.companyName || '').toUpperCase()];
       (rData.address || '').split(/\r?\n/).forEach(l => { if (l.trim()) head.push(l.trim()); });
       if (p?.telNo && p?.format === 'NEW_HP') head.push(`MB-${p.telNo}`);
+      if (p?.format !== 'NEW_HP') {
+        // OLD format: label on the left, value pushed to the right edge (like the app preview).
+        const W = 32;
+        const rl = (l: string, r: string) =>
+          l.length + r.length + 1 <= W ? l + ' '.repeat(W - l.length - r.length) + r : l + '\n' + r.padStart(W, ' ');
+        const rule = '-'.repeat(W);
+        const g1 = [
+          rl('TEL NO:', p?.telNo || ''), rl('RECEIPT NO:', p?.receiptNo || ''), rl('FCC ID:', p?.fccId || 'N/A'),
+          rl('FIP NO:', p?.fipNo || 'N/A'), rl('NOZZLE NO:', p?.nozzleNo || 'N/A'),
+        ];
+        const g2 = [
+          rl('PRODUCT:', p?.product || ''), rl('RATE/LTR:', (p?.ratePerLtr || 0).toFixed(2)),
+          rl('AMOUNT:', `₹${(p?.amount || 0).toFixed(2)}`), rl('VOLUME(LTR):', `${(p?.volumeLtr || 0).toFixed(2)} lt`),
+        ];
+        const g3 = [rl('VEH TYPE:', p?.vehType || ''), rl('VEH NO:', p?.vehicleNumber || ''), rl('CUSTOMER:', p?.customerName || '')];
+        const g4 = [
+          rl('DATE:', `${rData.date || ''} ${rData.time || ''}`.trim()), rl('MODE:', rData.paymentMode || ''),
+          rl('VAT NO:', p?.vatNo || 'N/A'), rl('ATTENDANT:', p?.attendantId || ''),
+        ];
+        const oldPre = (lines: string[]) =>
+          `<pre style="${MONO}font-size:14px;font-weight:700;line-height:1.55;margin:0;padding:0 0 0 2px;white-space:pre-wrap;">${lines.map(esc).join('\n')}</pre>`;
+        const ctr = (t: string, size: number, mb = 6) =>
+          `<div style="text-align:center;font-size:${size}px;font-weight:700;line-height:1.25;margin:0 0 ${mb}px 0;text-transform:uppercase;">${esc(t)}</div>`;
+        return `
+          <div style="width:100%;box-sizing:border-box;background:#fff;${MONO}">
+            ${getPetrolLogoHtmlForPdf(p)}
+            ${ctr('WELCOME!!!', 16, 6)}
+            ${ctr(rData.companyName || '', 15, 4)}
+            <div style="text-align:center;font-size:13px;font-weight:700;line-height:1.2;margin:0 0 6px 0;">${esc(rData.address || '')}</div>
+            ${oldPre([rule, ...g1, rule, ...g2, rule, ...g3, rule, ...g4, rule])}
+            <div style="text-align:center;font-size:14px;font-weight:700;margin-top:10px;">Thank You! Visit Again</div>
+          </div>`;
+      }
       let body: string[];
       if (p?.format === 'NEW_HP') {
         body = [
@@ -504,43 +537,76 @@ export default function App() {
         </div>`;
     }
 
-    // Restaurant / Super Market: same font, full paper width (no side gaps).
-    const NAME_W = 18; // characters per item-name line
+    // Restaurant and Super Market share the font and full width, but look different:
+    //   RESTAURANT = boxed bill, "=" rules, two-line items, "ORDER DETAILS", meal footer
+    //   SUPER MART = plain "TAX INVOICE", "-" rules, one-line item table, item/qty count
+    const W = 28;
     const money = (n: number) => (n || 0).toFixed(2);
-    const itemLines: string[] = [];
-    (rData.items || []).forEach((item, i) => {
-      const name = item.name || 'Unnamed Item';
-      const first = `${String(i + 1).padStart(2, ' ')} ${name}`;
-      const wrapped: string[] = [];
-      for (let k = 0; k < first.length; k += NAME_W + 3) wrapped.push(first.slice(k, k + NAME_W + 3));
-      itemLines.push(...wrapped);
-      const calc = `${item.quantity} x ${money(item.rate)}`;
-      const tot = money(item.total);
-      itemLines.push(calc + ' '.repeat(Math.max(1, 28 - calc.length - tot.length)) + tot);
-    });
-    const dash = '-'.repeat(28);
-    const rowLR = (l: string, r: string) => l + ' '.repeat(Math.max(1, 28 - l.length - r.length)) + r;
-    const lines: string[] = [
+    const rowLR = (l: string, r: string) => l + ' '.repeat(Math.max(1, W - l.length - r.length)) + r;
+    const wrap = (t: string, n: number) => { const out: string[] = []; for (let k = 0; k < t.length; k += n) out.push(t.slice(k, k + n)); return out.length ? out : ['']; };
+    const items = rData.items || [];
+    const isRest = rData.type === 'RESTAURANT';
+    const taxLine = (rData.taxAmount || 0) > 0
+      ? [rowLR(`${rData.taxLabel || 'TAX'}${rData.taxRate ? ` (${rData.taxRate}%)` : ''}`, `Rs.${money(rData.taxAmount)}`)]
+      : [];
+    const meta = [
       rowLR(`DATE:${rData.date || ''}`, `TIME:${rData.time || ''}`),
       `BILL NO:${rData.billNumber || ''}`,
       ...(rData.showGst !== false ? [`GSTIN:${rData.gstNumber || 'N/A'}`] : []),
       `MODE:${rData.paymentMode || ''}`,
-      dash,
-      rowLR('# ITEM', 'TOTAL'),
-      dash,
-      ...itemLines,
-      dash,
-      rowLR('SUBTOTAL', `Rs.${money(rData.subtotal || 0)}`),
-      rowLR('GRAND TOTAL', `Rs.${money(rData.total || 0)}`),
-      dash,
     ];
+    const nameBlock = `
+        <div style="text-align:center;font-size:18px;line-height:1.2;text-transform:uppercase;font-weight:700;">${esc(rData.companyName || 'STORE')}</div>
+        <div style="text-align:center;font-size:14px;line-height:1.2;margin-bottom:6px;">${esc(rData.address || '')}</div>`;
+    const thanks = (t: string[]) => preBlock(['', ...t], 14).replace('padding:0 0 0 2px', 'padding:0;text-align:center');
+    const bigTotal = (label: string) => {
+      const v = `Rs.${money(rData.total || 0)}`;
+      const line = label + ' '.repeat(Math.max(1, 24 - label.length - v.length)) + v; // 18px font => 24 chars fit
+      return `<pre style="${MONO}font-size:18px;font-weight:700;line-height:1.3;margin:0;padding:0 0 0 2px;white-space:pre;">${esc(line)}</pre>`;
+    };
+
+    if (isRest) {
+      const eq = '='.repeat(W);
+      const itemLines: string[] = [];
+      items.forEach((item, i) => {
+        wrap(`${String(i + 1).padStart(2, ' ')} ${item.name || 'Unnamed Item'}`, W).forEach(l => itemLines.push(l));
+        itemLines.push(rowLR(`   ${item.quantity} x ${money(item.rate)}`, money(item.total)));
+      });
+      return `
+        <div style="width:100%;box-sizing:border-box;background:#fff;border:2px solid #000;border-radius:6px;padding:6px 3px;${MONO}">
+          ${getRestaurantLogoHtmlForPdf(rData)}
+          ${nameBlock}
+          <div style="text-align:center;font-size:13px;font-weight:700;letter-spacing:1px;margin-bottom:4px;">* DINING - ORDER RECEIPT *</div>
+          ${preBlock([eq, ...meta, eq, 'ORDER DETAILS', eq, ...itemLines, eq, rowLR('SUBTOTAL', `Rs.${money(rData.subtotal || 0)}`), ...taxLine])}
+          ${bigTotal('TOTAL')}
+          ${preBlock([eq])}
+          ${thanks(['Thank You! Visit Again', 'Enjoy your meal!'])}
+        </div>`;
+    }
+
+    const dash = '-'.repeat(W);
+    const NAME = 9;
+    const cols = (n: string, q: string, r: string, a: string) => `${n.padEnd(NAME)} ${q.padStart(3)} ${r.padStart(6)} ${a.padStart(7)}`;
+    const tableLines: string[] = [cols('ITEM', 'QTY', 'RATE', 'AMT'), dash];
+    let totalQty = 0;
+    items.forEach(item => {
+      totalQty += Number(item.quantity) || 0;
+      const nm = item.name || 'Unnamed Item';
+      if (nm.length <= NAME) {
+        tableLines.push(cols(nm, String(item.quantity), money(item.rate), money(item.total)));
+      } else {
+        wrap(nm, W).forEach(l => tableLines.push(l));
+        tableLines.push(cols('', String(item.quantity), money(item.rate), money(item.total)));
+      }
+    });
     return `
       <div style="width:100%;box-sizing:border-box;background:#fff;${MONO}">
-        ${getRestaurantLogoHtmlForPdf(rData)}
-        <div style="text-align:center;font-size:18px;line-height:1.2;text-transform:uppercase;font-weight:700;">${esc(rData.companyName || 'STORE')}</div>
-        <div style="text-align:center;font-size:14px;line-height:1.2;margin-bottom:6px;">${esc(rData.address || '')}</div>
-        ${preBlock(lines)}
-        ${preBlock(['', 'Thank You! Visit Again'], 14).replace('padding:0 0 0 2px', 'padding:0;text-align:center')}
+        ${nameBlock}
+        <div style="text-align:center;font-size:15px;font-weight:700;margin-bottom:4px;">TAX INVOICE</div>
+        ${preBlock([dash, ...meta, dash, ...tableLines, dash, rowLR(`Items: ${items.length}`, `Qty: ${totalQty}`), rowLR('SUBTOTAL', `Rs.${money(rData.subtotal || 0)}`), ...taxLine])}
+        ${bigTotal('TOTAL')}
+        ${preBlock([dash])}
+        ${thanks(['Thank You For Shopping!', 'Have a nice day'])}
       </div>`;
   };
 
