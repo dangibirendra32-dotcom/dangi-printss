@@ -76,3 +76,15 @@
 - Receipt is now captured at exactly 384/288 scale (no resampling) for CatPrinter prints.
 - All text/borders are forced to pure black for printing.
 - Dithering + dilation replaced by a plain threshold (185) so text is solid and crisp.
+
+## Real cause of pale print (v8)
+- The heat/energy value was sent to the printer big-endian; the printer reads it little-endian, so "high" (0xD800) arrived as 0x00D8, i.e. almost no heat. Fixed.
+- Energy levels rescaled to values the printer expects (12000 / 18000 / 24000 / 65535).
+- New setting: Settings > BLE Hardware Tuning > Print Darkness (default Dark).
+
+## v9 - HP-style layout for all bills
+- All bills (petrol, restaurant, super market) now use Courier-style monospace 16px, regular weight, left aligned, line-height 1.2, like the HP slip photo.
+- Petrol bills use the "Label :value" rows (Bill No, Trns.ID, Atnd.ID, Receipt, Vehi.No, Mob.No, Date, Time, FP. ID, Nozl No, Fuel, Density, Preset, Rate, Sale, Volume).
+- Side margins cut from 16px to 2px per side; restaurant/supermarket boxes with inner padding removed, so text uses the full paper width.
+- Default login seeded on first run: ID birendrad / password Birendra#123 (change in Security settings).
+- Print threshold 185 -> 205 so regular-weight text prints solid.

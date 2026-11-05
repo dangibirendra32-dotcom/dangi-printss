@@ -51,6 +51,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { QRCodeSVG } from 'qrcode.react';
 import confetti from 'canvas-confetti';
 import html2canvas from 'html2canvas';
+import { ENERGY_LEVELS, DEFAULT_ENERGY } from './lib/catPrinterProtocol';
 
 // Waits for every <img> inside a container to finish loading (or fail) before
 // resolving. html2canvas captures whatever is currently painted — if a
@@ -149,6 +150,10 @@ export default function App() {
     const saved = localStorage.getItem('dangi_ble_delay_ms');
     return saved !== null ? Number(saved) : 20;
   });
+  const [catEnergy, setCatEnergy] = useState<number>(() => {
+    const saved = Number(localStorage.getItem('dangi_cat_energy'));
+    return Object.values(ENERGY_LEVELS).includes(saved) ? saved : DEFAULT_ENERGY;
+  });
   const [bleForceWriteWithResponse, setBleForceWriteWithResponse] = useState<boolean>(() => {
     return localStorage.getItem('dangi_ble_force_write') === 'true';
   });
@@ -171,8 +176,9 @@ export default function App() {
       printer.forceWriteWithResponse = bleForceWriteWithResponse;
       printer.useCrLf = bleUseCrLf;
       printer.sendCutCommand = bleSendCutCommand;
+      printer.setCatPrinterEnergy(catEnergy);
     }
-  }, [printer, bleChunkSize, bleDelayMs, bleForceWriteWithResponse, bleUseCrLf, bleSendCutCommand]);
+  }, [printer, bleChunkSize, bleDelayMs, bleForceWriteWithResponse, bleUseCrLf, bleSendCutCommand, catEnergy]);
 
   // Active GATT Discovery and Live-Override States
   const [activeServiceUuid, setActiveServiceUuid] = useState<string>('');
@@ -203,6 +209,11 @@ export default function App() {
   };
 
   // --- Secure Authentication State ---
+  // Seed the default login the first time the app runs (can be changed later in Security settings).
+  if (!localStorage.getItem('tinyprint_username') || !localStorage.getItem('tinyprint_password')) {
+    localStorage.setItem('tinyprint_username', 'birendrad');
+    localStorage.setItem('tinyprint_password', 'Birendra#123');
+  }
   const [isSecurityEnabled, setIsSecurityEnabled] = useState<boolean>(() => {
     const hasCredentials = !!localStorage.getItem('tinyprint_username') && !!localStorage.getItem('tinyprint_password');
     return hasCredentials && localStorage.getItem('tinyprint_security_enabled') !== 'false';
@@ -420,137 +431,111 @@ export default function App() {
   };
 
   const renderReceiptHtmlForExport = (rData: ReceiptData): string => {
+    // One shared look for every bill: Courier-style monospace, ~16px, regular weight,
+    // left aligned, tight line spacing (same as the HP station slip).
+    const MONO = `font-family:'Courier New',Courier,'Liberation Mono',monospace;color:#000;`;
+    const esc = (v: unknown) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const preBlock = (lines: string[], size = 16) =>
+      `<pre style="${MONO}font-size:${size}px;font-weight:400;line-height:1.2;margin:0;padding:0 0 0 2px;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;">${lines.map(esc).join('\n')}</pre>`;
+    const field = (label: string, value: unknown, width = 7) => `${label.padEnd(width, ' ')}:${value ?? ''}`;
+
     if (rData.type === 'PETROL') {
       const p = rData.petrolDetails;
+      const head: string[] = [(rData.companyName || '').toUpperCase()];
+      (rData.address || '').split(/\r?\n/).forEach(l => { if (l.trim()) head.push(l.trim()); });
+      if (p?.telNo) head.push(`MB-${p.telNo}`);
+      let body: string[];
       if (p?.format === 'NEW_HP') {
-        const row = (label: string, value: string, bold = false) => `<div style="display:grid;grid-template-columns:28% 72%;column-gap:0;align-items:baseline;margin:0 0 2px 0;line-height:1.12;${bold ? 'font-weight:900;' : ''}"><span style="white-space:nowrap;">${label}</span><span style="text-align:left;overflow-wrap:anywhere;word-break:break-word;">${value}</span></div>`;
-        return `
-          <div style="width:100%;color:#111827;font-family:monospace;font-size:12px;font-weight:800;box-sizing:border-box;background:#fff;">
-            ${getPetrolLogoHtmlForPdf(p)}
-            <div style="text-align:center;font-size:13px;font-weight:900;text-transform:uppercase;line-height:1.1;">${(rData.companyName || '').toUpperCase()}</div>
-            <div style="text-align:center;font-size:10px;font-weight:900;margin-top:3px;">DEALERS:- ${p?.dealerName || 'HPCL'}</div>
-            <div style="text-align:center;font-size:10px;font-weight:900;margin-top:3px;line-height:1.2;">${rData.address || ''}</div>
-            <div style="margin:9px 0 8px;padding:0;">
-              ${row('BILL NO:', rData.billNumber || p.receiptNo || '')}
-              ${row('Trns. ID:', p.transactionId || '')}
-              ${row('Atnd. ID:', p.attendantId || '')}
-              ${row('Vehi. No:', p.vehicleNumber || '')}
-              ${row('Date:', rData.date || '')}
-              ${row('Time:', rData.time || '')}
-              ${row('FP. ID:', p.fipNo || '')}
-              ${row('Nozl. No:', p.nozzleNo || '')}
-            </div>
-            <div style="font-size:12px;">
-              ${row('Fuel:', p.product || 'Petrol')}
-              ${row('Density:', `${(p.density ?? 835.7).toFixed(1)} kg/m3`)}
-              ${row('Preset:', p.preset || 'NON PRESET')}
-              ${row('Rate:', `Rs.${(p.ratePerLtr || 0).toFixed(2)}`, true)}
-              ${row('Sale:', `Rs.${(p.amount || 0).toFixed(2)}`, true)}
-              ${row('Volume:', `${(p.volumeLtr || 0).toFixed(2)} Lts.`, true)}
-            </div>
-            <div style="text-align:center;margin-top:10px;padding-top:0;">
-              <div style="font-size:10px;font-weight:900;text-transform:uppercase;">Thank You! Visit Again</div>
-              <div style="font-size:8px;margin-top:4px;font-weight:700;">SAVE FUEL, SAVE MONEY, SAVE THE PLANET.</div>
-            </div>
-          </div>`;
+        body = [
+          field('Bill No', rData.billNumber || p.receiptNo || ''),
+          field('Trns.ID', p.transactionId || ''),
+          field('Atnd.ID', p.attendantId || ''),
+          field('Receipt', 'Physical Receipt'),
+          field('Vehi.No', p.vehicleNumber || 'NotEntered'),
+          field('Mob.No', 'NotEntered'),
+          field('Date', rData.date || ''),
+          field('Time', rData.time || ''),
+          field('FP. ID', p.fipNo || ''),
+          field('Nozl No', p.nozzleNo || ''),
+          field('Fuel', (p.product || 'Petrol').toUpperCase()),
+          field('Density', `${(p.density ?? 745.3).toFixed(1)}kg/m3`),
+          field('Preset', p.preset || 'NON PRESET'),
+          field('Rate', `Rs.${(p.ratePerLtr || 0).toFixed(2)}`),
+          field('Sale', `Rs.${(p.amount || 0).toFixed(2)}`),
+          field('Volume', `${(p.volumeLtr || 0).toFixed(2)}L`),
+        ];
+      } else {
+        const w = 11;
+        body = [
+          field('TEL NO', p?.telNo || '', w),
+          field('RECEIPT NO', p?.receiptNo || '', w),
+          field('FCC ID', p?.fccId || 'N/A', w),
+          field('FIP NO', p?.fipNo || 'N/A', w),
+          field('NOZZLE NO', p?.nozzleNo || 'N/A', w),
+          '',
+          field('PRODUCT', p?.product || '', w),
+          field('RATE/LTR', (p?.ratePerLtr || 0).toFixed(2), w),
+          field('AMOUNT', `Rs.${(p?.amount || 0).toFixed(2)}`, w),
+          field('VOLUME(LTR)', `${(p?.volumeLtr || 0).toFixed(2)} lt`, w),
+          '',
+          field('VEH TYPE', p?.vehType || '', w),
+          field('VEH NO', p?.vehicleNumber || '', w),
+          field('CUSTOMER', p?.customerName || '', w),
+          '',
+          field('DATE', `${rData.date || ''} ${rData.time || ''}`, w),
+          field('MODE', rData.paymentMode || '', w),
+          field('VAT NO', p?.vatNo || 'N/A', w),
+          field('ATTENDANT', p?.attendantId || '', w),
+        ];
       }
-      const petrolRow = (label: string, value: string) => `
-        <div style="display:grid; grid-template-columns:48% 52%; column-gap:6px; align-items:baseline; margin:0 0 7px 0; line-height:1.25; font-weight:900;">
-          <span style="white-space:nowrap;">${label}</span><span style="text-align:right; overflow-wrap:anywhere; word-break:break-word;">${value}</span>
-        </div>`;
       return `
-        <div style="width:100%; color:#111827; font-family:monospace; font-size:12px; font-weight:900; box-sizing:border-box; background-color:#ffffff;">
+        <div style="width:100%;box-sizing:border-box;background:#fff;${MONO}">
           ${getPetrolLogoHtmlForPdf(p)}
-          <div style="text-align: center; font-weight: 900; font-size: 12px; margin-bottom: 8px; margin-top: 4px;">WELCOME!!!</div>
-          <div style="text-align: center; font-size: 11px; margin-bottom: 8px; line-height: 1.2; font-weight: 900; text-transform: uppercase;">${(rData.companyName || '').toUpperCase()}</div>
-          <div style="text-align: center; font-size: 10px; margin-bottom: 16px; line-height: 1.2;">${rData.address || ''}</div>
-          
-          <div style="font-size:11px; margin:0 0 14px 0; border-top:1px dashed #9ca3af; border-bottom:1px dashed #9ca3af; padding:10px 0 7px 0;">
-            ${petrolRow('TEL NO:', p?.telNo || '')}
-            ${petrolRow('RECEIPT NO:', p?.receiptNo || '')}
-            ${petrolRow('FCC ID:', p?.fccId || 'N/A')}
-            ${petrolRow('FIP NO:', p?.fipNo || 'N/A')}
-            ${petrolRow('NOZZLE NO:', p?.nozzleNo || 'N/A')}
-          </div>
-          <div style="font-size:12px; margin:0 0 14px 0; padding:10px 0 6px 0; border-bottom:1px dashed #9ca3af; font-weight:900;">
-            ${petrolRow('PRODUCT:', p?.product || '')}
-            ${petrolRow('RATE/LTR:', (p?.ratePerLtr || 0).toFixed(2))}
-            ${petrolRow('AMOUNT:', `₹${(p?.amount || 0).toFixed(2)}`)}
-            ${petrolRow('VOLUME(LTR):', `${(p?.volumeLtr || 0).toFixed(2)} lt`)}
-          </div>
-          <div style="font-size:11px; margin-bottom:14px;">
-            ${petrolRow('VEH TYPE:', p?.vehType || '')}
-            ${petrolRow('VEH NO:', p?.vehicleNumber || '')}
-            ${petrolRow('CUSTOMER:', p?.customerName || '')}
-          </div>
-          <div style="font-size:11px; padding-top:10px; border-top:1px dashed #9ca3af;">
-            ${petrolRow('DATE:', `${rData.date || ''} ${rData.time || ''}`)}
-            ${petrolRow('MODE:', rData.paymentMode || '')}
-            ${petrolRow('VAT NO:', p?.vatNo || 'N/A')}
-            ${petrolRow('ATTENDANT:', p?.attendantId || '')}
-          </div>
-
-          <div style="text-align: center; margin-top: 24px; margin-bottom: 8px;">
-            <div style="font-weight: 900; font-size: 12px; text-transform: uppercase;">Thank You! Visit Again</div>
-            <div style="font-size: 8px; margin-top: 4px; font-weight: 700;">SAVE FUEL, SAVE MONEY, SAVE THE PLANET.</div>
-          </div>
-        </div>
-      `;
+          ${preBlock(head)}
+          ${preBlock([''])}
+          ${preBlock(body)}
+          ${preBlock(['', 'Thank You! Visit Again'], 14)}
+        </div>`;
     }
 
-    const itemsHtml = (rData.items || []).map((item, index) => `
-      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin: 4px 0; font-size: 10px;">
-        <span style="width: 8%;">${index + 1}</span>
-        <span style="width: 32%; word-break: break-word; line-height: 1.1;">${item.name || 'Unnamed Item'}</span>
-        <span style="width: 15%; text-align: right;">${item.quantity}</span>
-        <span style="width: 20%; text-align: right;">₹${(item.rate || 0).toFixed(2)}</span>
-        <span style="width: 25%; text-align: right;">₹${(item.total || 0).toFixed(2)}</span>
-      </div>
-    `).join('');
-
+    // Restaurant / Super Market: same font, full paper width (no side gaps).
+    const NAME_W = 18; // characters per item-name line
+    const money = (n: number) => (n || 0).toFixed(2);
+    const itemLines: string[] = [];
+    (rData.items || []).forEach((item, i) => {
+      const name = item.name || 'Unnamed Item';
+      const first = `${String(i + 1).padStart(2, ' ')} ${name}`;
+      const wrapped: string[] = [];
+      for (let k = 0; k < first.length; k += NAME_W + 3) wrapped.push(first.slice(k, k + NAME_W + 3));
+      itemLines.push(...wrapped);
+      const calc = `${item.quantity} x ${money(item.rate)}`;
+      const tot = money(item.total);
+      itemLines.push(calc + ' '.repeat(Math.max(1, 28 - calc.length - tot.length)) + tot);
+    });
+    const dash = '-'.repeat(28);
+    const rowLR = (l: string, r: string) => l + ' '.repeat(Math.max(1, 28 - l.length - r.length)) + r;
+    const lines: string[] = [
+      rowLR(`DATE:${rData.date || ''}`, `TIME:${rData.time || ''}`),
+      `BILL NO:${rData.billNumber || ''}`,
+      ...(rData.showGst !== false ? [`GSTIN:${rData.gstNumber || 'N/A'}`] : []),
+      `MODE:${rData.paymentMode || ''}`,
+      dash,
+      rowLR('# ITEM', 'TOTAL'),
+      dash,
+      ...itemLines,
+      dash,
+      rowLR('SUBTOTAL', `Rs.${money(rData.subtotal || 0)}`),
+      rowLR('GRAND TOTAL', `Rs.${money(rData.total || 0)}`),
+      dash,
+    ];
     return `
-      <div style="width: 100%; color: #1e293b; font-family: monospace; font-size: 11px; box-sizing: border-box; background-color: #ffffff;">
+      <div style="width:100%;box-sizing:border-box;background:#fff;${MONO}">
         ${getRestaurantLogoHtmlForPdf(rData)}
-        <h1 style="font-size:${rData.type === 'RESTAURANT' ? '15px' : '14px'}; font-weight:900; text-align:center; margin-bottom:4px; line-height:1; text-transform:uppercase; color:#0f172a;">${rData.companyName || 'STORE'}</h1>
-        <p style="text-align:center; font-size:10px; margin-bottom:6px; white-space:normal;">${rData.address || ''}</p>
-        ${rData.type === 'RESTAURANT' ? `<div style="text-align:center; font-size:8px; font-weight:900; letter-spacing:2px; margin-bottom:8px;">DINING • ORDER RECEIPT</div>` : ''}
-        <div style="width:100%; height:1px; border-bottom:1px dashed #cbd5e1; margin:8px 0;"></div>
-
-        <div style="width:100%; font-size:10px; padding:${rData.type === 'RESTAURANT' ? '7px 5px' : '0 4px'}; margin-bottom:6px; box-sizing:border-box; ${rData.type === 'RESTAURANT' ? 'background:#f8fafc; border:1px solid #cbd5e1; border-radius:5px;' : ''}">
-          <div style="display:flex; justify-content:space-between;"><span>DATE: ${rData.date || ''}</span><span>TIME: ${rData.time || ''}</span></div>
-          <div>BILL NO: ${rData.billNumber || ''}</div>
-          ${rData.showGst !== false ? `<div>GSTIN: ${rData.gstNumber || 'N/A'}</div>` : ''}
-          <div>MODE: ${rData.paymentMode || ''}</div>
-        </div>
-
-        <div style="width:100%; height:1px; border-bottom:1px dashed #cbd5e1; margin:8px 0;"></div>
-
-        <div style="width:100%; padding:${rData.type === 'RESTAURANT' ? '7px 6px' : '0 4px'}; box-sizing:border-box; ${rData.type === 'RESTAURANT' ? 'border:1px solid #cbd5e1; border-radius:5px;' : ''}">
-          ${rData.type === 'RESTAURANT' ? `<div style="font-size:8px; font-weight:900; letter-spacing:1.5px; color:#64748b; margin-bottom:6px;">ORDER DETAILS</div>` : ''}
-          <div style="display:flex; justify-content:space-between; font-weight:900; font-size:10px; margin-bottom:4px; border-bottom:1px solid #e2e8f0; padding-bottom:4px;">
-            <span style="width:8%;">#</span>
-            <span style="width:32%;">ITEM</span>
-            <span style="width:15%; text-align:right;">QTY</span>
-            <span style="width:20%; text-align:right;">RATE</span>
-            <span style="width:25%; text-align:right;">TOTAL</span>
-          </div>
-          <div style="margin-bottom:8px;">${itemsHtml}</div>
-        </div>
-
-        <div style="width: 100%; height: 1px; border-bottom: 1px dashed #cbd5e1; margin: 8px 0;"></div>
-
-        <div style="width: 100%; padding: 0 4px; text-align: right; font-size: 10px;">
-          <div style="display: flex; justify-content: space-between; margin-bottom: 3px;"><span>SUBTOTAL</span><span>₹${(rData.subtotal || 0).toFixed(2)}</span></div>
-          <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 900; margin-top: 6px;">
-            <span style="text-transform: uppercase;">Grand Total</span>
-            <span>₹${(rData.total || 0).toFixed(2)}</span>
-          </div>
-        </div>
-
-        <div style="width: 100%; height: 1px; border-bottom: 1px dashed #cbd5e1; margin: 16px 0 12px 0;"></div>
-        <p style="text-align: center; font-weight: 700; margin-top: 12px; text-transform: uppercase; font-size: 11px;">Thank You! Visit Again</p>
-      </div>
-    `;
+        <div style="text-align:center;font-size:18px;line-height:1.2;text-transform:uppercase;font-weight:700;">${esc(rData.companyName || 'STORE')}</div>
+        <div style="text-align:center;font-size:14px;line-height:1.2;margin-bottom:6px;">${esc(rData.address || '')}</div>
+        ${preBlock(lines)}
+        ${preBlock(['', 'Thank You! Visit Again'], 14).replace('padding:0 0 0 2px', 'padding:0;text-align:center')}
+      </div>`;
   };
 
   // Receipt DOM is 288px wide; the Cat printer head is 384 dots wide. Capturing at
@@ -564,7 +549,7 @@ export default function App() {
     tempDiv.style.top = '-10000px';
     tempDiv.style.left = '-10000px';
     tempDiv.style.width = '288px';
-    tempDiv.style.padding = '24px 16px';
+    tempDiv.style.padding = '8px 2px';
     tempDiv.style.backgroundColor = '#ffffff';
     tempDiv.style.color = '#111827';
     tempDiv.style.boxSizing = 'border-box';
@@ -948,6 +933,7 @@ export default function App() {
     setBluetoothConnectionError('');
     try {
       const newPrinter = new ThermalPrinter();
+      newPrinter.setCatPrinterEnergy(catEnergy);
       newPrinter.chunkSize = bleChunkSize;
       newPrinter.delayMs = bleDelayMs;
       newPrinter.forceWriteWithResponse = bleForceWriteWithResponse;
@@ -2864,6 +2850,24 @@ export default function App() {
                         <option value={100}>100 ms (Super Slow)</option>
                       </select>
                     </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">Print Darkness (Cat Printer)</label>
+                    <select
+                      value={catEnergy}
+                      onChange={(e) => {
+                        const v = Number(e.target.value);
+                        setCatEnergy(v);
+                        localStorage.setItem('dangi_cat_energy', String(v));
+                      }}
+                      className="w-full bg-white text-slate-800 px-2.5 py-1.5 rounded-xl border border-slate-200 outline-none text-xs font-semibold cursor-pointer"
+                    >
+                      <option value={ENERGY_LEVELS.LOW}>Light</option>
+                      <option value={ENERGY_LEVELS.MEDIUM}>Medium</option>
+                      <option value={ENERGY_LEVELS.HIGH}>Dark (Recommended)</option>
+                      <option value={ENERGY_LEVELS.MAXIMUM}>Darkest</option>
+                    </select>
                   </div>
 
                   <div className="space-y-2 pt-1.5">

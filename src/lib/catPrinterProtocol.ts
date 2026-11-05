@@ -77,7 +77,11 @@ function packet(cmd: number, payload: number[]): number[] {
 }
 
 function cmdSetEnergy(val: number): number[] {
-  return packet(CMD.SET_ENERGY, [(val >> 8) & 0xff, val & 0xff]);
+  // The printer reads the 16-bit energy value LITTLE-endian (low byte first),
+  // like every other multi-byte field in this protocol. It was previously sent
+  // big-endian, so 0xD800 was received as 0x00D8 = almost no heat, which is
+  // exactly why the receipts came out pale with only a few dark rows.
+  return packet(CMD.SET_ENERGY, [val & 0xff, (val >> 8) & 0xff]);
 }
 
 function cmdApplyEnergyOrPrintText(): number[] {
@@ -116,18 +120,16 @@ function cmdPrintRow(row: boolean[]): number[] {
   return packet(CMD.PRINT_ROW_UNCOMPRESSED, rowToBitmapBytes(row));
 }
 
-// ENERGY_LEVELS: Different heat/energy settings for SC03h cat printers.
- // Maximum is the default because the requested output is bold and dark.
+// ENERGY_LEVELS: Different energy settings for cat printers
+// OPTIMIZATION 1: Reduced energy to prevent over-burning
 export const ENERGY_LEVELS = {
-  LOW: 0x8000,      // 50% - for very sensitive printers
-  MEDIUM: 0xC000,   // 75% - for most printers
-  HIGH: 0xD800,     // 84.4% - Recommended for most cat printers
-  MAXIMUM: 0xFFFF,  // 100% - Maximum energy (may over-burn)
+  LOW: 0x2ee0,      // 12000 - light, for fresh/sensitive paper
+  MEDIUM: 0x4650,   // 18000
+  HIGH: 0x5dc0,     // 24000 - dark, recommended starting point
+  MAXIMUM: 0xffff,  // 65535 - darkest (may smear / use more battery)
 };
 
-// Default energy level: maximum head energy for darker, clearer SC03h prints.
-// The user can still select LOW/MEDIUM/HIGH if a particular paper is too dark.
-export const DEFAULT_ENERGY = ENERGY_LEVELS.MAXIMUM;
+export const DEFAULT_ENERGY = ENERGY_LEVELS.HIGH;
 
 export function buildCatPrinterImageCommands(rows: boolean[][], energy: number = DEFAULT_ENERGY): Uint8Array {
   const packets: number[][] = [
@@ -225,12 +227,11 @@ export function canvasToCatPrinterRows(canvas: HTMLCanvasElement): boolean[][] {
       : 255; // transparent -> white
   }
 
-  // Use a strong threshold for the SC03h thermal head. A slightly higher
-  // threshold preserves the dark parts of anti-aliased text instead of
-  // throwing away edge pixels, which is a common cause of faded-looking
-  // receipts on mini thermal printers.
-  const THRESHOLD = 195;
-
+  // Thermal paper is strictly black/white. Floyd-Steinberg dithering turned
+  // anti-aliased text into faint scattered dots, so use a plain threshold:
+  // anything darker than THRESHOLD becomes a solid black dot. Text stays crisp
+  // and dark; no extra dilation (it made small text blobby).
+  const THRESHOLD = 205;
   const rows: boolean[][] = [];
   for (let y = 0; y < h; y++) {
     const row: boolean[] = new Array(w);
@@ -239,31 +240,5 @@ export function canvasToCatPrinterRows(canvas: HTMLCanvasElement): boolean[][] {
     }
     rows.push(row);
   }
-
-  // One-pixel 8-neighbour expansion makes normal receipt text visibly
-  // bolder/clearer after thermal conversion without using dithering.
-  // Keep the expansion to exactly one pass so small text and QR/barcode
-  // geometry are not excessively blurred.
-  const boldRows: boolean[][] = rows.map(row => row.slice());
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      if (rows[y][x]) continue;
-      let neighbourIsBlack = false;
-      for (let dy = -1; dy <= 1 && !neighbourIsBlack; dy++) {
-        const yy = y + dy;
-        if (yy < 0 || yy >= h) continue;
-        for (let dx = -1; dx <= 1; dx++) {
-          if (dx === 0 && dy === 0) continue;
-          const xx = x + dx;
-          if (xx >= 0 && xx < w && rows[yy][xx]) {
-            neighbourIsBlack = true;
-            break;
-          }
-        }
-      }
-      if (neighbourIsBlack) boldRows[y][x] = true;
-    }
-  }
-
-  return boldRows;
+  return rows;
 }
