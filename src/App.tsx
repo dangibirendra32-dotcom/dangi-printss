@@ -443,6 +443,8 @@ export default function App() {
     const esc = (v: unknown) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const preBlock = (lines: string[], size = 16) =>
       `<pre style="${MONO}font-size:${size}px;font-weight:700;line-height:1.2;margin:0;padding:0 0 0 2px;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;">${lines.map(esc).join('\n')}</pre>`;
+    const defaultSlogan = rData.type === 'PETROL' ? 'SAVE FUEL, SAVE MONEY, SAVE THE PLANET.' : rData.type === 'RESTAURANT' ? 'Enjoy your meal!' : 'Have a nice day';
+    const sloganLines: string[] = rData.showSlogan === false ? [] : [(rData.slogan || '').trim() || defaultSlogan];
     const field = (label: string, value: unknown, width = 7) => `${label.padEnd(width, ' ')}:${value ?? ''}`;
 
     if (rData.type === 'PETROL') {
@@ -478,9 +480,10 @@ export default function App() {
             ${getPetrolLogoHtmlForPdf(p)}
             ${ctr('WELCOME!!!', 16, 6)}
             ${ctr(rData.companyName || '', 15, 4)}
-            <div style="text-align:center;font-size:13px;font-weight:700;line-height:1.2;margin:0 0 6px 0;">${esc(rData.address || '')}</div>
+            <div style="text-align:center;font-size:14px;font-weight:700;line-height:1.25;margin:0 0 6px 0;">${esc(rData.address || '')}</div>
             ${oldPre([rule, ...g1, rule, ...g2, rule, ...g3, rule, ...g4, rule])}
             <div style="text-align:center;font-size:14px;font-weight:700;margin-top:10px;">Thank You! Visit Again</div>
+            ${sloganLines.map(l => `<div style="text-align:center;font-size:12px;font-weight:700;margin-top:4px;line-height:1.2;">${esc(l)}</div>`).join('')}
           </div>`;
       }
       let body: string[];
@@ -533,7 +536,7 @@ export default function App() {
           ${preBlock(head)}
           ${preBlock([''])}
           ${preBlock(body)}
-          ${preBlock(['', 'Thank You! Visit Again'], 14)}
+          ${preBlock(['', 'Thank You! Visit Again', ...sloganLines], 14).replace('padding:0 0 0 2px', 'padding:0;text-align:center')}
         </div>`;
     }
 
@@ -557,7 +560,7 @@ export default function App() {
     ];
     const nameBlock = `
         <div style="text-align:center;font-size:18px;line-height:1.2;text-transform:uppercase;font-weight:700;">${esc(rData.companyName || 'STORE')}</div>
-        <div style="text-align:center;font-size:14px;line-height:1.2;margin-bottom:6px;">${esc(rData.address || '')}</div>`;
+        <div style="text-align:center;font-size:15px;font-weight:700;line-height:1.25;margin-bottom:6px;">${esc(rData.address || '')}</div>`;
     const thanks = (t: string[]) => preBlock(['', ...t], 14).replace('padding:0 0 0 2px', 'padding:0;text-align:center');
     const bigTotal = (label: string) => {
       const v = `Rs.${money(rData.total || 0)}`;
@@ -580,7 +583,7 @@ export default function App() {
           ${preBlock([eq, ...meta, eq, 'ORDER DETAILS', eq, ...itemLines, eq, rowLR('SUBTOTAL', `Rs.${money(rData.subtotal || 0)}`), ...taxLine])}
           ${bigTotal('TOTAL')}
           ${preBlock([eq])}
-          ${thanks(['Thank You! Visit Again', 'Enjoy your meal!'])}
+          ${thanks(['Thank You! Visit Again', ...sloganLines])}
         </div>`;
     }
 
@@ -606,7 +609,7 @@ export default function App() {
         ${preBlock([dash, ...meta, dash, ...tableLines, dash, rowLR(`Items: ${items.length}`, `Qty: ${totalQty}`), rowLR('SUBTOTAL', `Rs.${money(rData.subtotal || 0)}`), ...taxLine])}
         ${bigTotal('TOTAL')}
         ${preBlock([dash])}
-        ${thanks(['Thank You For Shopping!', 'Have a nice day'])}
+        ${thanks(['Thank You For Shopping!', ...sloganLines])}
       </div>`;
   };
 
@@ -639,13 +642,44 @@ export default function App() {
     try {
       await new Promise(resolve => setTimeout(resolve, 60));
       await waitForImagesToLoad(tempDiv);
-      return await html2canvas(tempDiv, {
+      const out = await html2canvas(tempDiv, {
         scale,
         useCORS: true,
         allowTaint: true,
         backgroundColor: '#ffffff',
         logging: false,
       });
+      if (forPrint) {
+        // Logos are colour pictures; a plain black/white cutoff turns them into solid
+        // blobs. Halftone (ordered dither) just the logo areas so they keep their detail.
+        try {
+          const ctx = out.getContext('2d');
+          const base = tempDiv.getBoundingClientRect();
+          const bayer = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+          tempDiv.querySelectorAll('img').forEach((img) => {
+            const r = img.getBoundingClientRect();
+            const x0 = Math.max(0, Math.floor((r.left - base.left) * scale));
+            const y0 = Math.max(0, Math.floor((r.top - base.top) * scale));
+            const w = Math.min(out.width - x0, Math.ceil(r.width * scale));
+            const h = Math.min(out.height - y0, Math.ceil(r.height * scale));
+            if (!ctx || w <= 0 || h <= 0) return;
+            const id = ctx.getImageData(x0, y0, w, h);
+            const d = id.data;
+            for (let y = 0; y < h; y++) {
+              for (let x = 0; x < w; x++) {
+                const i = (y * w + x) * 4;
+                const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+                const thr = ((bayer[(y & 3) * 4 + (x & 3)] + 0.5) / 16) * 255;
+                const v = g < thr ? 0 : 255;
+                d[i] = d[i + 1] = d[i + 2] = v;
+                d[i + 3] = 255;
+              }
+            }
+            ctx.putImageData(id, x0, y0);
+          });
+        } catch (e) { /* if the canvas is tainted, fall back to plain threshold */ }
+      }
+      return out;
     } finally {
       if (document.body.contains(tempDiv)) document.body.removeChild(tempDiv);
     }
@@ -1493,6 +1527,29 @@ export default function App() {
                     placeholder="Physical Address"
                   />
                 </div>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block">Bottom Slogan</label>
+                    <label className="flex items-center gap-2 cursor-pointer select-none text-xs font-bold text-slate-500">
+                      <input
+                        type="checkbox"
+                        checked={data.showSlogan !== false}
+                        onChange={(e) => setData({...data, showSlogan: e.target.checked})}
+                        className="w-4 h-4 accent-emerald-600"
+                      />
+                      {data.showSlogan !== false ? 'Show' : 'Hide'}
+                    </label>
+                  </div>
+                  {data.showSlogan !== false && (
+                    <input
+                      type="text"
+                      value={data.slogan || ''}
+                      onChange={(e) => setData({...data, slogan: e.target.value})}
+                      className="w-full px-4 py-3 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-emerald-500 transition-all font-medium"
+                      placeholder="Leave empty for default slogan"
+                    />
+                  )}
+                </div>
               </div>
 
               <div className="space-y-4">
@@ -2339,7 +2396,7 @@ export default function App() {
             <div className="bg-white p-4 pt-12 pb-24 shadow-[0_50px_100px_-20px_rgba(0,0,0,0.15)] rounded-t-[40px] rounded-b-[40px] w-full max-w-[320px] mx-auto overflow-hidden relative border-t-[10px] border-emerald-100">
                
               {/* Receipt Content -> Strictly 2 inches width emulation */}
-              <div id="receipt-paper-container" className="receipt-paper mx-auto bg-white w-[288px] px-[2px] py-2 text-black antialiased">
+              <div id="receipt-paper-container" className="mx-auto bg-white w-[288px] min-w-[288px] px-[2px] py-2 text-black antialiased">
                 {/* Preview uses the SAME renderer as printing, so screen == paper */}
                 <div className="w-full" dangerouslySetInnerHTML={{ __html: renderReceiptHtmlForExport(data) }} />
               </div>

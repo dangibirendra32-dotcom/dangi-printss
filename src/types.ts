@@ -58,6 +58,10 @@ export interface ReceiptData {
   restaurantLogo?: 'UTENSILS' | 'COFFEE' | 'PIZZA' | 'FLAME' | 'BAR' | 'NONE' | 'CUSTOM';
   restaurantCustomLogoUrl?: string;
   showGst?: boolean;
+  /** Footer slogan line at the bottom of the bill. undefined/true = show, false = hide. */
+  showSlogan?: boolean;
+  /** Custom slogan text; empty = default for the bill type. */
+  slogan?: string;
 }
 
 export interface HistoryItem {

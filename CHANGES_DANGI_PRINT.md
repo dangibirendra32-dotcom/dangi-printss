@@ -106,3 +106,9 @@
 - Restaurant bill: boxed, "=" rules, "DINING - ORDER RECEIPT", ORDER DETAILS, two-line items, "Enjoy your meal!".
 - Super Mart bill: "TAX INVOICE", "-" rules, one-line item table (ITEM QTY RATE AMT), Items/Qty count, "Thank You For Shopping!".
 - Tax line is printed when taxAmount > 0.
+
+## v14
+- Preview bug: the old .receipt-paper CSS forced width 250px + Courier Prime + contrast filter, so lines wrapped on screen but not on paper. Preview container no longer uses it (288px, same font as print).
+- New "Bottom Slogan" Show/Hide + editable text under Address; works on petrol (both formats), restaurant and super mart. Default text per bill type.
+- Address line now bold and slightly larger on all formats.
+- Print: logo areas are halftoned (ordered dither) instead of becoming solid black blobs.
