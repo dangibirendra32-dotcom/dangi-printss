@@ -1,0 +1,76 @@
+export type BillType = 'MART' | 'RESTAURANT' | 'PETROL';
+
+export type PetrolCompany = 'JIO_BP' | 'HP' | 'BHARAT_PETROLEUM' | 'INDIAN_OIL' | 'NAYARA' | 'ESSAR' | 'CUSTOM';
+
+export interface ReceiptItem {
+  id: string;
+  name: string;
+  quantity: number;
+  rate: number;
+  total: number;
+}
+
+export interface ReceiptData {
+  type: BillType;
+  companyName: string;
+  address: string;
+  phone: string;
+  gstNumber?: string;
+  date: string;
+  time: string;
+  billNumber: string;
+  items: ReceiptItem[];
+  subtotal: number;
+  taxLabel: string;
+  taxRate: number;
+  taxAmount: number;
+  total: number;
+  paymentMode: string;
+  petrolDetails?: {
+    company: PetrolCompany;
+    /** Petrol receipt layout: legacy app format or HP-style service-station format. */
+    format?: 'OLD' | 'NEW_HP';
+    transactionId?: string;
+    /** Optional editable dealer/agency line used by the NEW_HP layout. */
+    dealerName?: string;
+    density?: number;
+    preset?: string;
+    customLogoUrl?: string;
+    telNo: string;
+    receiptNo: string;
+    fccId: string;
+    fipNo: string;
+    nozzleNo: string;
+    product: string;
+    ratePerLtr: number;
+    volumeLtr: number;
+    amount: number;
+    vehType: string;
+    vehicleNumber: string;
+    customerName: string;
+    lstNo: string;
+    vatNo: string;
+    attendantId: string;
+  };
+  qrValue?: string;
+  fontSize: 'small' | 'medium' | 'large';
+  fontStyle: 'normal' | 'condensed' | 'bold';
+  restaurantLogo?: 'UTENSILS' | 'COFFEE' | 'PIZZA' | 'FLAME' | 'BAR' | 'NONE' | 'CUSTOM';
+  restaurantCustomLogoUrl?: string;
+  showGst?: boolean;
+  /** Footer slogan line at the bottom of the bill. undefined/true = show, false = hide. */
+  showSlogan?: boolean;
+  /** First footer line (Thank You...). undefined/true = show, false = hide. */
+  showThankYou?: boolean;
+  /** Custom first footer line; empty = default for the bill type. */
+  thankYou?: string;
+  /** Custom slogan text; empty = default for the bill type. */
+  slogan?: string;
+}
+
+export interface HistoryItem {
+  id: string;
+  savedAt: string; // ISO string
+  receiptData: ReceiptData;
+}
+

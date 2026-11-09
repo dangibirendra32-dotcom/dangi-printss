@@ -112,3 +112,13 @@
 - New "Bottom Slogan" Show/Hide + editable text under Address; works on petrol (both formats), restaurant and super mart. Default text per bill type.
 - Address line now bold and slightly larger on all formats.
 - Print: logo areas are halftoned (ordered dither) instead of becoming solid black blobs.
+
+## v15
+- Footer: Thank-you line and slogan line each have their own Show/Hide + editable text (all 3 bill types). Slogan prints at 12px so it stays on one line.
+- Restaurant logo: real SVG icons (utensils/coffee/pizza/flame/wine) instead of words like PIZZA/GRILL.
+- History is split per bill type (shows only the active tab's bills; Clear All only clears that type).
+- Super Mart: TAX INVOICE removed. Restaurant: border removed.
+- Quick reprint: editable Bill No for all types (petrol: sets Receipt No, which is the petrol bill number).
+- NEW_HP petrol: Bill No now follows Receipt No.
+- Logos print with a per-logo black/white cutoff (Otsu) instead of dot dithering.
+- TOTAL line right edge aligned with rows above it.
