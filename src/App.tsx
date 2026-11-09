@@ -399,8 +399,8 @@ export default function App() {
     // An uploaded logo always wins. This keeps the NEW_HP format editable just
     // like the old format instead of locking it to the selected company logo.
     if (p?.customLogoUrl) {
-      return `<div style="display:flex;justify-content:center;align-items:center;width:100%;height:120px;margin:4px 0 8px 0;overflow:hidden;">
-        <img src="${p.customLogoUrl}" style="display:block;max-width:150px;max-height:110px;width:auto;height:auto;object-fit:contain;" />
+      return `<div style="display:flex;justify-content:center;align-items:center;width:100%;height:150px;margin:4px 0 8px 0;overflow:hidden;">
+        <img src="${p.customLogoUrl}" style="display:block;max-width:190px;max-height:140px;width:auto;height:auto;object-fit:contain;" />
       </div>`;
     }
     if (company === 'CUSTOM') return '';
@@ -416,7 +416,7 @@ export default function App() {
     const src = logoSrcByCompany[company as Exclude<PetrolCompany, 'CUSTOM'>] || logoSrcByCompany.JIO_BP;
 
     return `<div style="display: flex; justify-content: center; align-items: center; width: 100%; margin: 4px 0 8px 0;">
-      <img src="${src}" style="max-width: 150px; max-height: 110px; object-fit: contain;" />
+      <img src="${src}" style="max-width: 190px; max-height: 140px; object-fit: contain;" />
     </div>`;
   };
 
@@ -424,8 +424,8 @@ export default function App() {
     if (rData.type !== 'RESTAURANT' || rData.restaurantLogo === 'NONE') return '';
 
     const badge = (innerHtml: string) => `
-      <div style="display:flex; justify-content:center; align-items:center; width:100%; height:48px; margin-bottom:10px;">
-        <div style="width:44px; height:44px; min-width:44px; min-height:44px; box-sizing:border-box; border:2px solid #0f172a; border-radius:9999px; display:flex; align-items:center; justify-content:center; overflow:hidden; line-height:0;">
+      <div style="display:flex; justify-content:center; align-items:center; width:100%; height:84px; margin-bottom:8px;">
+        <div style="width:80px; height:80px; min-width:80px; min-height:80px; box-sizing:border-box; border:3px solid #000; border-radius:9999px; display:flex; align-items:center; justify-content:center; overflow:hidden; line-height:0;">
           ${innerHtml}
         </div>
       </div>
@@ -433,7 +433,7 @@ export default function App() {
 
     if (rData.restaurantLogo === 'CUSTOM') {
       if (rData.restaurantCustomLogoUrl) {
-        return badge(`<img src="${rData.restaurantCustomLogoUrl}" width="28" height="28" style="display:block; width:28px; height:28px; max-width:28px; max-height:28px; object-fit:contain; flex:0 0 28px;" />`);
+        return badge(`<img src="${rData.restaurantCustomLogoUrl}" width="54" height="54" style="display:block; width:54px; height:54px; max-width:54px; max-height:54px; object-fit:contain; flex:0 0 54px;" />`);
       }
       rData = { ...rData, restaurantLogo: 'UTENSILS' };
     }
@@ -450,7 +450,7 @@ export default function App() {
     const paths = iconPaths[key] || iconPaths.UTENSILS;
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
     const dataUri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
-    return badge(`<img src="${dataUri}" width="28" height="28" style="display:block;width:28px;height:28px;" />`);
+    return badge(`<img src="${dataUri}" width="54" height="54" style="display:block;width:54px;height:54px;" />`);
   };
 
   const renderReceiptHtmlForExport = (rData: ReceiptData): string => {
@@ -458,8 +458,8 @@ export default function App() {
     // left aligned, tight line spacing (same as the HP station slip).
     const MONO = `font-family:'Courier New',Courier,'Liberation Mono',monospace;color:#000;`;
     const esc = (v: unknown) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const preBlock = (lines: string[], size = 16) =>
-      `<pre style="${MONO}font-size:${size}px;font-weight:700;line-height:1.2;margin:0;padding:0 0 0 2px;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;">${lines.map(esc).join('\n')}</pre>`;
+    const preBlock = (lines: string[], size = 16, lh = 1.2) =>
+      `<pre style="${MONO}font-size:${size}px;font-weight:700;line-height:${lh};margin:0;padding:0 0 0 2px;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;">${lines.map(esc).join('\n')}</pre>`;
     const defaultThanks = rData.type === 'MART' ? 'Thank You For Shopping!' : 'Thank You! Visit Again';
     const defaultSlogan = rData.type === 'PETROL' ? 'SAVE FUEL, SAVE MONEY, SAVE THE PLANET.' : rData.type === 'RESTAURANT' ? 'Enjoy your meal!' : 'Have a nice day';
     const thankLines: string[] = rData.showThankYou === false ? [] : [(rData.thankYou || '').trim() || defaultThanks];
@@ -503,7 +503,7 @@ export default function App() {
         return `
           <div style="width:100%;box-sizing:border-box;background:#fff;${MONO}">
             ${getPetrolLogoHtmlForPdf(p)}
-            ${ctr('WELCOME!!!', 16, 6)}
+            ${ctr('WELCOME', 16, 6)}
             ${ctr(rData.companyName || '', 15, 4)}
             <div style="text-align:center;font-size:14px;font-weight:700;line-height:1.25;margin:0 0 6px 0;">${esc(rData.address || '')}</div>
             ${oldPre([rule, ...g1, rule, ...g2, rule, ...g3, rule, ...g4, rule])}
@@ -603,7 +603,7 @@ export default function App() {
           ${getRestaurantLogoHtmlForPdf(rData)}
           ${nameBlock}
           <div style="text-align:center;font-size:13px;font-weight:700;letter-spacing:1px;margin-bottom:4px;">* DINING - ORDER RECEIPT *</div>
-          ${preBlock([eq, ...meta, eq, 'ORDER DETAILS', eq, ...itemLines, eq, rowLR('SUBTOTAL', `Rs.${money(rData.subtotal || 0)}`), ...taxLine])}
+          ${preBlock([eq, ...meta, eq, 'ORDER DETAILS', eq, ...itemLines, eq, rowLR('SUBTOTAL', `Rs.${money(rData.subtotal || 0)}`), ...taxLine], 16, 1.35)}
           ${bigTotal('TOTAL')}
           ${preBlock([eq])}
           ${footerHtml()}
@@ -628,7 +628,7 @@ export default function App() {
     return `
       <div style="width:100%;box-sizing:border-box;background:#fff;${MONO}">
         ${nameBlock}
-        ${preBlock([dash, ...meta, dash, ...tableLines, dash, rowLR(`Items: ${items.length}`, `Qty: ${totalQty}`), rowLR('SUBTOTAL', `Rs.${money(rData.subtotal || 0)}`), ...taxLine])}
+        ${preBlock([dash, ...meta, dash, ...tableLines, dash, rowLR(`Items: ${items.length}`, `Qty: ${totalQty}`), rowLR('SUBTOTAL', `Rs.${money(rData.subtotal || 0)}`), ...taxLine], 16, 1.35)}
         ${bigTotal('TOTAL')}
         ${preBlock([dash])}
         ${footerHtml()}
@@ -910,7 +910,7 @@ export default function App() {
         } else {
           chunks.push(cmds.ALIGN_CENTER);
           chunks.push(cmds.TEXT_SIZE_LARGE);
-          chunks.push(ThermalPrinter.textToUint8("WELCOME!!!"));
+          chunks.push(ThermalPrinter.textToUint8("WELCOME"));
           chunks.push(ThermalPrinter.textToUint8(`${adjusted.companyName.toUpperCase()}`));
           chunks.push(cmds.TEXT_SIZE_NORMAL);
           chunks.push(ThermalPrinter.textToUint8(adjusted.address));
@@ -1257,7 +1257,7 @@ export default function App() {
         } else {
           chunks.push(cmds.ALIGN_CENTER);
           chunks.push(cmds.TEXT_SIZE_LARGE);
-          chunks.push(ThermalPrinter.textToUint8("WELCOME!!!"));
+          chunks.push(ThermalPrinter.textToUint8("WELCOME"));
           chunks.push(ThermalPrinter.textToUint8(`${data.companyName.toUpperCase()}`));
           chunks.push(cmds.TEXT_SIZE_NORMAL);
           chunks.push(ThermalPrinter.textToUint8(data.address));

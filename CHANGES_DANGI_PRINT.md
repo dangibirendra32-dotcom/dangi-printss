@@ -122,3 +122,8 @@
 - NEW_HP petrol: Bill No now follows Receipt No.
 - Logos print with a per-logo black/white cutoff (Otsu) instead of dot dithering.
 - TOTAL line right edge aligned with rows above it.
+
+## v16
+- Restaurant logo much bigger (80px circle, 54px icon). Petrol logo ~25% bigger (max 190x140).
+- "WELCOME!!!" -> "WELCOME" (screen, print and fallback text print).
+- Restaurant and Super Mart rows have slightly more line spacing (1.35).
