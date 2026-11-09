@@ -331,6 +331,11 @@ export default function App() {
   const [quickTime, setQuickTime] = useState<string>('');
   const [quickAmount, setQuickAmount] = useState<string>('');
   const [quickCustomerName, setQuickCustomerName] = useState<string>('');
+  const [quickBillNo, setQuickBillNo] = useState<string>('');
+
+  // History is shown per bill type (Petrol / Restaurant / Super Mart) following the active tab.
+  const historyTypeLabel = activeTab === 'PETROL' ? 'Petrol' : activeTab === 'RESTAURANT' ? 'Restaurant' : 'Super Mart';
+  const typeHistory = history.filter(h => h.receiptData.type === activeTab);
 
   const saveToHistory = (customData?: ReceiptData) => {
     const dataToSave = customData || data;
@@ -378,6 +383,10 @@ export default function App() {
     }
     setQuickAmount(initialAmt);
     setQuickCustomerName(item.receiptData.petrolDetails?.customerName || '');
+    // Petrol bills show the Receipt No as their bill number; Mart/Restaurant use billNumber.
+    setQuickBillNo(item.receiptData.type === 'PETROL'
+      ? (item.receiptData.petrolDetails?.receiptNo || item.receiptData.billNumber || '')
+      : (item.receiptData.billNumber || ''));
     setShowQuickReprintModal(true);
   };
 
@@ -426,14 +435,22 @@ export default function App() {
       if (rData.restaurantCustomLogoUrl) {
         return badge(`<img src="${rData.restaurantCustomLogoUrl}" width="28" height="28" style="display:block; width:28px; height:28px; max-width:28px; max-height:28px; object-fit:contain; flex:0 0 28px;" />`);
       }
-      return badge('<span style="display:flex; align-items:center; justify-content:center; width:28px; height:28px; font-family:Arial,sans-serif; font-size:8px; font-weight:900; letter-spacing:.4px;">UTENSILS</span>');
+      rData = { ...rData, restaurantLogo: 'UTENSILS' };
     }
 
-    const symbolByLogo: Record<Exclude<NonNullable<ReceiptData['restaurantLogo']>, 'NONE' | 'CUSTOM'>, string> = {
-      UTENSILS: 'UTENSILS', COFFEE: 'CAFE', PIZZA: 'PIZZA', FLAME: 'GRILL', BAR: 'BAR',
+    // Real icons (same shapes as the on-screen picker), drawn as SVG images so they print as pictures, not words.
+    const iconPaths: Record<string, string> = {
+      UTENSILS: '<path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/>',
+      COFFEE: '<path d="M10 2v2"/><path d="M14 2v2"/><path d="M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a4 4 0 1 1 0 8h-1"/><path d="M6 2v2"/>',
+      PIZZA: '<path d="m12 14-1 1"/><path d="m13.75 18.25-1.25 1.42"/><path d="M17.775 5.654a15.68 15.68 0 0 0-12.121 12.12"/><path d="M18.8 9.3a1 1 0 0 0 2.1 7.7"/><path d="M21.964 20.732a1 1 0 0 1-1.232 1.232l-18-5a1 1 0 0 1-.695-1.232A19.68 19.68 0 0 1 15.732 2.037a1 1 0 0 1 1.232.695z"/>',
+      FLAME: '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>',
+      BAR: '<path d="M8 22h8"/><path d="M7 10h10"/><path d="M12 15v7"/><path d="M12 15a5 5 0 0 0 5-5c0-2-.5-4-2-8H9c-1.5 4-2 6-2 8a5 5 0 0 0 5 5z"/>',
     };
-    const symbol = symbolByLogo[(rData.restaurantLogo || 'UTENSILS') as keyof typeof symbolByLogo] || 'UTENSILS';
-    return badge(`<span style="display:flex; align-items:center; justify-content:center; width:28px; height:28px; font-family:Arial,sans-serif; font-size:8px; font-weight:900; letter-spacing:.4px; text-align:center;">${symbol}</span>`);
+    const key = (rData.restaurantLogo || 'UTENSILS') as string;
+    const paths = iconPaths[key] || iconPaths.UTENSILS;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
+    const dataUri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+    return badge(`<img src="${dataUri}" width="28" height="28" style="display:block;width:28px;height:28px;" />`);
   };
 
   const renderReceiptHtmlForExport = (rData: ReceiptData): string => {
@@ -443,8 +460,16 @@ export default function App() {
     const esc = (v: unknown) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const preBlock = (lines: string[], size = 16) =>
       `<pre style="${MONO}font-size:${size}px;font-weight:700;line-height:1.2;margin:0;padding:0 0 0 2px;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;">${lines.map(esc).join('\n')}</pre>`;
+    const defaultThanks = rData.type === 'MART' ? 'Thank You For Shopping!' : 'Thank You! Visit Again';
     const defaultSlogan = rData.type === 'PETROL' ? 'SAVE FUEL, SAVE MONEY, SAVE THE PLANET.' : rData.type === 'RESTAURANT' ? 'Enjoy your meal!' : 'Have a nice day';
+    const thankLines: string[] = rData.showThankYou === false ? [] : [(rData.thankYou || '').trim() || defaultThanks];
     const sloganLines: string[] = rData.showSlogan === false ? [] : [(rData.slogan || '').trim() || defaultSlogan];
+    // Footer: thank-you line at 14px, slogan line at 12px (fits ~40 chars, so the long petrol slogan stays on one line).
+    const footerHtml = () => {
+      const t = thankLines.map(l => `<div style="text-align:center;font-size:14px;font-weight:700;line-height:1.25;overflow-wrap:anywhere;">${esc(l)}</div>`).join('');
+      const g = sloganLines.map(l => `<div style="text-align:center;font-size:12px;font-weight:700;line-height:1.25;margin-top:3px;overflow-wrap:anywhere;">${esc(l)}</div>`).join('');
+      return (t || g) ? `<div style="margin-top:10px;">${t}${g}</div>` : '';
+    };
     const field = (label: string, value: unknown, width = 7) => `${label.padEnd(width, ' ')}:${value ?? ''}`;
 
     if (rData.type === 'PETROL') {
@@ -482,14 +507,13 @@ export default function App() {
             ${ctr(rData.companyName || '', 15, 4)}
             <div style="text-align:center;font-size:14px;font-weight:700;line-height:1.25;margin:0 0 6px 0;">${esc(rData.address || '')}</div>
             ${oldPre([rule, ...g1, rule, ...g2, rule, ...g3, rule, ...g4, rule])}
-            <div style="text-align:center;font-size:14px;font-weight:700;margin-top:10px;">Thank You! Visit Again</div>
-            ${sloganLines.map(l => `<div style="text-align:center;font-size:12px;font-weight:700;margin-top:4px;line-height:1.2;">${esc(l)}</div>`).join('')}
+            ${footerHtml()}
           </div>`;
       }
       let body: string[];
       if (p?.format === 'NEW_HP') {
         body = [
-          field('Bill No', rData.billNumber || p.receiptNo || ''),
+          field('Bill No', p.receiptNo || rData.billNumber || ''),
           field('Trns.ID', p.transactionId || ''),
           field('Atnd.ID', p.attendantId || ''),
           field('Receipt', 'Physical Receipt'),
@@ -536,7 +560,7 @@ export default function App() {
           ${preBlock(head)}
           ${preBlock([''])}
           ${preBlock(body)}
-          ${preBlock(['', 'Thank You! Visit Again', ...sloganLines], 14).replace('padding:0 0 0 2px', 'padding:0;text-align:center')}
+          ${footerHtml()}
         </div>`;
     }
 
@@ -561,11 +585,10 @@ export default function App() {
     const nameBlock = `
         <div style="text-align:center;font-size:18px;line-height:1.2;text-transform:uppercase;font-weight:700;">${esc(rData.companyName || 'STORE')}</div>
         <div style="text-align:center;font-size:15px;font-weight:700;line-height:1.25;margin-bottom:6px;">${esc(rData.address || '')}</div>`;
-    const thanks = (t: string[]) => preBlock(['', ...t], 14).replace('padding:0 0 0 2px', 'padding:0;text-align:center');
     const bigTotal = (label: string) => {
       const v = `Rs.${money(rData.total || 0)}`;
       const line = label + ' '.repeat(Math.max(1, 24 - label.length - v.length)) + v; // 18px font => 24 chars fit
-      return `<pre style="${MONO}font-size:18px;font-weight:700;line-height:1.3;margin:0;padding:0 0 0 2px;white-space:pre;">${esc(line)}</pre>`;
+      return `<pre style="${MONO}font-size:18px;font-weight:700;line-height:1.3;margin:0 10px 0 0;padding:0 0 0 2px;white-space:pre;">${esc(line)}</pre>`;
     };
 
     if (isRest) {
@@ -576,14 +599,14 @@ export default function App() {
         itemLines.push(rowLR(`   ${item.quantity} x ${money(item.rate)}`, money(item.total)));
       });
       return `
-        <div style="width:100%;box-sizing:border-box;background:#fff;border:2px solid #000;border-radius:6px;padding:6px 3px;${MONO}">
+        <div style="width:100%;box-sizing:border-box;background:#fff;padding:2px 0;${MONO}">
           ${getRestaurantLogoHtmlForPdf(rData)}
           ${nameBlock}
           <div style="text-align:center;font-size:13px;font-weight:700;letter-spacing:1px;margin-bottom:4px;">* DINING - ORDER RECEIPT *</div>
           ${preBlock([eq, ...meta, eq, 'ORDER DETAILS', eq, ...itemLines, eq, rowLR('SUBTOTAL', `Rs.${money(rData.subtotal || 0)}`), ...taxLine])}
           ${bigTotal('TOTAL')}
           ${preBlock([eq])}
-          ${thanks(['Thank You! Visit Again', ...sloganLines])}
+          ${footerHtml()}
         </div>`;
     }
 
@@ -605,11 +628,10 @@ export default function App() {
     return `
       <div style="width:100%;box-sizing:border-box;background:#fff;${MONO}">
         ${nameBlock}
-        <div style="text-align:center;font-size:15px;font-weight:700;margin-bottom:4px;">TAX INVOICE</div>
         ${preBlock([dash, ...meta, dash, ...tableLines, dash, rowLR(`Items: ${items.length}`, `Qty: ${totalQty}`), rowLR('SUBTOTAL', `Rs.${money(rData.subtotal || 0)}`), ...taxLine])}
         ${bigTotal('TOTAL')}
         ${preBlock([dash])}
-        ${thanks(['Thank You For Shopping!', ...sloganLines])}
+        ${footerHtml()}
       </div>`;
   };
 
@@ -650,12 +672,10 @@ export default function App() {
         logging: false,
       });
       if (forPrint) {
-        // Logos are colour pictures; a plain black/white cutoff turns them into solid
-        // blobs. Halftone (ordered dither) just the logo areas so they keep their detail.
+        // Logos are colour pictures: convert each one to crisp black/white (Otsu cutoff).
         try {
           const ctx = out.getContext('2d');
           const base = tempDiv.getBoundingClientRect();
-          const bayer = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
           tempDiv.querySelectorAll('img').forEach((img) => {
             const r = img.getBoundingClientRect();
             const x0 = Math.max(0, Math.floor((r.left - base.left) * scale));
@@ -665,15 +685,24 @@ export default function App() {
             if (!ctx || w <= 0 || h <= 0) return;
             const id = ctx.getImageData(x0, y0, w, h);
             const d = id.data;
-            for (let y = 0; y < h; y++) {
-              for (let x = 0; x < w; x++) {
-                const i = (y * w + x) * 4;
-                const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-                const thr = ((bayer[(y & 3) * 4 + (x & 3)] + 0.5) / 16) * 255;
-                const v = g < thr ? 0 : 255;
-                d[i] = d[i + 1] = d[i + 2] = v;
-                d[i + 3] = 255;
-              }
+            // Otsu: pick the best black/white cutoff for THIS logo, so shapes and letters
+            // stay sharp and solid (no dot pattern) whatever the logo's colours are.
+            const hist = new Array(256).fill(0);
+            for (let i = 0; i < d.length; i += 4) hist[Math.round(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2])]++;
+            const total = w * h; let sumAll = 0; for (let k = 0; k < 256; k++) sumAll += k * hist[k];
+            let wB = 0, sumB = 0, best = -1, cut = 160;
+            for (let k = 0; k < 256; k++) {
+              wB += hist[k]; if (!wB) continue;
+              const wF = total - wB; if (!wF) break;
+              sumB += k * hist[k];
+              const mB = sumB / wB, mF = (sumAll - sumB) / wF;
+              const between = wB * wF * (mB - mF) * (mB - mF);
+              if (between > best) { best = between; cut = k; }
+            }
+            for (let i = 0; i < d.length; i += 4) {
+              const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+              const v = g <= cut ? 0 : 255;
+              d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255;
             }
             ctx.putImageData(id, x0, y0);
           });
@@ -748,6 +777,8 @@ export default function App() {
     const adjusted = JSON.parse(JSON.stringify(selectedHistoryItem.receiptData)) as ReceiptData;
     adjusted.date = quickDate;
     adjusted.time = quickTime;
+    adjusted.billNumber = quickBillNo;
+    if (adjusted.type === 'PETROL' && adjusted.petrolDetails) adjusted.petrolDetails.receiptNo = quickBillNo;
 
     const targetTotal = parseFloat(quickAmount) || 0;
     if (adjusted.type === 'PETROL') {
@@ -799,6 +830,8 @@ export default function App() {
       const adjusted = JSON.parse(JSON.stringify(selectedHistoryItem.receiptData)) as ReceiptData;
       adjusted.date = quickDate;
       adjusted.time = quickTime;
+      adjusted.billNumber = quickBillNo;
+      if (adjusted.type === 'PETROL' && adjusted.petrolDetails) adjusted.petrolDetails.receiptNo = quickBillNo;
 
       const targetTotal = parseFloat(quickAmount) || 0;
       if (adjusted.type === 'PETROL') {
@@ -860,7 +893,7 @@ export default function App() {
           chunks.push(ThermalPrinter.textToUint8(adjusted.address));
           chunks.push(cmds.ALIGN_LEFT);
           const newPetrolRow = (label: string, value: string) => ThermalPrinter.textToUint8(`${label.padEnd(9, ' ')}${value}`);
-          chunks.push(newPetrolRow('BILL NO:', adjusted.billNumber || p.receiptNo || ''));
+          chunks.push(newPetrolRow('BILL NO:', p.receiptNo || adjusted.billNumber || ''));
           chunks.push(newPetrolRow('Trns. ID:', p.transactionId || ''));
           chunks.push(newPetrolRow('Atnd. ID:', p.attendantId || ''));
           chunks.push(newPetrolRow('Vehi. No:', p.vehicleNumber || ''));
@@ -1207,7 +1240,7 @@ export default function App() {
           chunks.push(ThermalPrinter.textToUint8(data.address));
           chunks.push(cmds.ALIGN_LEFT);
           const newPetrolRow = (label: string, value: string) => ThermalPrinter.textToUint8(`${label.padEnd(9, ' ')}${value}`);
-          chunks.push(newPetrolRow('BILL NO:', data.billNumber || p.receiptNo || ''));
+          chunks.push(newPetrolRow('BILL NO:', p.receiptNo || data.billNumber || ''));
           chunks.push(newPetrolRow('Trns. ID:', p.transactionId || ''));
           chunks.push(newPetrolRow('Atnd. ID:', p.attendantId || ''));
           chunks.push(newPetrolRow('Vehi. No:', p.vehicleNumber || ''));
@@ -1529,7 +1562,30 @@ export default function App() {
                 </div>
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block">Bottom Slogan</label>
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block">Footer Line 1 (Thank You)</label>
+                    <label className="flex items-center gap-2 cursor-pointer select-none text-xs font-bold text-slate-500">
+                      <input
+                        type="checkbox"
+                        checked={data.showThankYou !== false}
+                        onChange={(e) => setData({...data, showThankYou: e.target.checked})}
+                        className="w-4 h-4 accent-emerald-600"
+                      />
+                      {data.showThankYou !== false ? 'Show' : 'Hide'}
+                    </label>
+                  </div>
+                  {data.showThankYou !== false && (
+                    <input
+                      type="text"
+                      value={data.thankYou || ''}
+                      onChange={(e) => setData({...data, thankYou: e.target.value})}
+                      className="w-full px-4 py-3 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-emerald-500 transition-all font-medium"
+                      placeholder={data.type === 'MART' ? 'Thank You For Shopping!' : 'Thank You! Visit Again'}
+                    />
+                  )}
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block">Footer Line 2 (Slogan)</label>
                     <label className="flex items-center gap-2 cursor-pointer select-none text-xs font-bold text-slate-500">
                       <input
                         type="checkbox"
@@ -1546,7 +1602,7 @@ export default function App() {
                       value={data.slogan || ''}
                       onChange={(e) => setData({...data, slogan: e.target.value})}
                       className="w-full px-4 py-3 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-emerald-500 transition-all font-medium"
-                      placeholder="Leave empty for default slogan"
+                      placeholder={data.type === 'PETROL' ? 'SAVE FUEL, SAVE MONEY, SAVE THE PLANET.' : data.type === 'RESTAURANT' ? 'Enjoy your meal!' : 'Have a nice day'}
                     />
                   )}
                 </div>
@@ -2266,16 +2322,19 @@ export default function App() {
                   <History className="w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className="text-sm font-black text-slate-800 uppercase tracking-wider">Printed Receipts History</h2>
+                  <h2 className="text-sm font-black text-slate-800 uppercase tracking-wider">{historyTypeLabel} Receipts History</h2>
                   <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">Adjust and Reprint Instantly</p>
                 </div>
               </div>
-              {history.length > 0 && (
+              {typeHistory.length > 0 && (
                 <button 
                   onClick={() => {
-                    if(confirm("Are you sure you want to clear all history?")) {
-                      setHistory([]);
-                      localStorage.removeItem('tinyprint_history');
+                    if(confirm(`Clear all ${historyTypeLabel} history? Other bill types are kept.`)) {
+                      setHistory(prev => {
+                        const updated = prev.filter(h => h.receiptData.type !== activeTab);
+                        localStorage.setItem('tinyprint_history', JSON.stringify(updated));
+                        return updated;
+                      });
                     }
                   }}
                   className="text-[10px] text-red-500 hover:text-red-700 font-bold uppercase tracking-wider hover:underline bg-transparent border-none cursor-pointer"
@@ -2285,17 +2344,17 @@ export default function App() {
               )}
             </div>
 
-            {history.length === 0 ? (
+            {typeHistory.length === 0 ? (
               <div className="py-10 text-center flex flex-col items-center">
                 <Clock className="w-10 h-10 text-slate-300 mb-2 animate-pulse" />
-                <p className="text-xs font-black text-slate-600 uppercase tracking-widest">No print history yet</p>
+                <p className="text-xs font-black text-slate-600 uppercase tracking-widest">No {historyTypeLabel} history yet</p>
                 <p className="text-[10px] text-slate-400 font-semibold max-w-sm mt-1 leading-relaxed">
                   Printed receipts from the template generator automatically save here. You'll be able to reprint them with modified dates or amounts in one click!
                 </p>
               </div>
             ) : (
               <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin">
-                {history.map((item) => {
+                {typeHistory.map((item) => {
                   const rData = item.receiptData;
                   const dateObj = new Date(item.savedAt);
                   const formattedSavedTime = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' ' + dateObj.toLocaleDateString();
@@ -3177,6 +3236,18 @@ export default function App() {
               </div>
 
               <div className="space-y-4">
+                {/* Bill No Input */}
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 block">{selectedHistoryItem.receiptData.type === 'PETROL' ? 'Bill / Receipt No' : 'Bill No'}</label>
+                  <input
+                    type="text"
+                    value={quickBillNo}
+                    onChange={(e) => setQuickBillNo(e.target.value)}
+                    className="w-full px-4 py-2.5 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-emerald-500 transition-all font-semibold text-xs focus:outline-none"
+                    placeholder="Bill number"
+                  />
+                </div>
+
                 {/* Date Input */}
                 <div>
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 block">New Bill Date</label>

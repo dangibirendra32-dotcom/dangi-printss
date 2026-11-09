@@ -60,6 +60,10 @@ export interface ReceiptData {
   showGst?: boolean;
   /** Footer slogan line at the bottom of the bill. undefined/true = show, false = hide. */
   showSlogan?: boolean;
+  /** First footer line (Thank You...). undefined/true = show, false = hide. */
+  showThankYou?: boolean;
+  /** Custom first footer line; empty = default for the bill type. */
+  thankYou?: string;
   /** Custom slogan text; empty = default for the bill type. */
   slogan?: string;
 }
